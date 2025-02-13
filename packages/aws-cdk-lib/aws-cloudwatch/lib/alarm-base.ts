@@ -36,7 +36,6 @@ export interface IAlarm extends IAlarmRule, IResource {
  * The base class for Alarm and CompositeAlarm resources.
  */
 export abstract class AlarmBase extends Resource implements IAlarm {
-
   /**
    * @attribute
    */
@@ -57,7 +56,7 @@ export abstract class AlarmBase extends Resource implements IAlarm {
   /**
    * Trigger this action if the alarm fires
    *
-   * Typically SnsAcion or AutoScalingAction.
+   * Typically SnsAction or AutoScalingAction.
    */
   public addAlarmAction(...actions: IAlarmAction[]) {
     if (this.alarmActionArns === undefined) {
@@ -70,7 +69,7 @@ export abstract class AlarmBase extends Resource implements IAlarm {
   /**
    * Trigger this action if there is insufficient data to evaluate the alarm
    *
-   * Typically SnsAcion or AutoScalingAction.
+   * Typically SnsAction or AutoScalingAction.
    */
   public addInsufficientDataAction(...actions: IAlarmAction[]) {
     if (this.insufficientDataActionArns === undefined) {
@@ -83,7 +82,7 @@ export abstract class AlarmBase extends Resource implements IAlarm {
   /**
    * Trigger this action if the alarm returns from breaching state into ok state
    *
-   * Typically SnsAcion or AutoScalingAction.
+   * Typically SnsAction or AutoScalingAction.
    */
   public addOkAction(...actions: IAlarmAction[]) {
     if (this.okActionArns === undefined) {
@@ -92,5 +91,4 @@ export abstract class AlarmBase extends Resource implements IAlarm {
 
     this.okActionArns.push(...actions.map(a => a.bind(this, this).alarmActionArn));
   }
-
 }

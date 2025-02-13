@@ -97,6 +97,34 @@ new codepipeline_actions.CodeBuildAction({
 });
 ```
 
+If you want to use a custom event for your `CodeCommitSourceAction`, you can pass in
+a `customEventRule` which needs an event pattern (see [here](https://docs.aws.amazon.com/codecommit/latest/userguide/monitoring-events.html)) and an `IRuleTarget` (see [here](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_events_targets-readme.html))
+
+```ts
+const eventPattern = {
+  'detail-type': ['CodeCommit Repository State Change'],
+  'resources': ['foo'],
+  'source': ['aws.codecommit'],
+  'detail': {
+    referenceType: ['branch'],
+    event: ['referenceCreated', 'referenceUpdated'],
+    referenceName: ['master'],
+  },
+};
+declare const repo: codecommit.Repository;
+declare const lambdaFunction: lambda.Function;
+const sourceOutput = new codepipeline.Artifact();
+const sourceAction = new codepipeline_actions.CodeCommitSourceAction({
+  actionName: 'CodeCommit',
+  repository: repo,
+  output: sourceOutput,
+  customEventRule: {
+    eventPattern,
+    target: new targets.LambdaFunction(lambdaFunction),
+  }
+});
+```
+
 ### GitHub
 
 If you want to use a GitHub repository as the source, you must create:
@@ -250,7 +278,7 @@ you can specify the region explicitly:
 
 ```ts
 const sourceBucket = s3.Bucket.fromBucketAttributes(this, 'SourceBucket', {
-  bucketName: 'my-bucket',
+  bucketName: 'amzn-s3-demo-bucket',
   region: 'ap-southeast-1',
 });
 ```
@@ -754,7 +782,7 @@ const lambdaCode = lambda.Code.fromCfnParameters();
 const func = new lambda.Function(this, 'Lambda', {
   code: lambdaCode,
   handler: 'index.handler',
-  runtime: lambda.Runtime.NODEJS_14_X,
+  runtime: lambda.Runtime.NODEJS_LATEST,
 });
 // used to make sure each CDK synthesis produces a different Version
 const version = func.currentVersion;
@@ -857,9 +885,11 @@ Here's an example:
 To use an S3 Bucket as a deployment target in CodePipeline:
 
 ```ts
+import * as kms from 'aws-cdk-lib/aws-kms';
+
 const sourceOutput = new codepipeline.Artifact();
 const targetBucket = new s3.Bucket(this, 'MyBucket');
-const key: kms.IKey = new kms.Key(stack, 'EnvVarEncryptKey', {
+const key: kms.IKey = new kms.Key(this, 'EnvVarEncryptKey', {
   description: 'sample key',
 });
 
@@ -1143,10 +1173,10 @@ Example:
 const lambdaInvokeAction = new codepipeline_actions.LambdaInvokeAction({
   actionName: 'Lambda',
   lambda: new lambda.Function(this, 'Func', {
-    runtime: lambda.Runtime.NODEJS_14_X,
+    runtime: lambda.Runtime.NODEJS_LATEST,
     handler: 'index.handler',
     code: lambda.Code.fromInline(`
-        const AWS = require('aws-sdk');
+        const { CodePipeline } = require('@aws-sdk/client-codepipeline');
 
         exports.handler = async function(event, context) {
             const codepipeline = new AWS.CodePipeline();
@@ -1155,7 +1185,7 @@ const lambdaInvokeAction = new codepipeline_actions.LambdaInvokeAction({
                 outputVariables: {
                     MY_VAR: "some value",
                 },
-            }).promise();
+            });
         }
     `),
   }),
@@ -1227,3 +1257,104 @@ pipeline.addStage({
 
 See [the AWS documentation](https://docs.aws.amazon.com/codepipeline/latest/userguide/action-reference-StepFunctions.html)
 for information on Action structure reference.
+
+## Compute
+
+### Commands
+
+The Commands action allows you to run shell commands in a virtual compute instance. When you run the action, commands
+specified in the action configuration are run in a separate container. All artifacts that are specified as input
+artifacts to a CodeBuild action are available inside of the container running the commands. This action allows you
+to specify commands without first creating a CodeBuild project.
+
+```ts
+// Source action
+const bucket = new s3.Bucket(this, 'SourceBucket', {
+  versioned: true,
+});
+const sourceArtifact = new codepipeline.Artifact('SourceArtifact');
+const sourceAction = new codepipeline_actions.S3SourceAction({
+  actionName: 'Source',
+  output: sourceArtifact,
+  bucket,
+  bucketKey: 'my.zip',
+});
+
+// Commands action
+const outputArtifact = new codepipeline.Artifact('OutputArtifact');
+const commandsAction = new codepipeline_actions.CommandsAction({
+  actionName: 'Commands',
+  commands: [
+    'echo "some commands"',
+  ],
+  input: sourceArtifact,
+  output: outputArtifact,
+});
+
+const pipeline = new codepipeline.Pipeline(this, 'Pipeline', {
+  stages: [
+    {
+      stageName: 'Source',
+      actions: [sourceAction],
+    },
+    {
+      stageName: 'Commands',
+      actions: [commandsAction],
+    },
+  ],
+});
+```
+
+If you want to filter the files to be included in the output artifact, you can specify their paths as the second
+argument to `Artifact`.
+
+```ts
+declare const sourceArtifact: codepipeline.Artifact;
+
+// filter files to be included in the output artifact
+const outputArtifact = new codepipeline.Artifact('OutputArtifact', ['my-dir/**/*']);
+const commandsAction = new codepipeline_actions.CommandsAction({
+  actionName: 'Commands',
+  commands: [
+    'mkdir -p my-dir',
+    'echo "HelloWorld" > my-dir/file.txt',
+  ],
+  input: sourceArtifact,
+  output: outputArtifact,
+});
+```
+
+You can also specify the `outputVariables` property in the `CommandsAction` to emit environment variables that can be used
+in subsequent actions. The variables are those defined in your shell commands or exported as defaults by the CodeBuild service.
+For a reference of CodeBuild environment variables, see
+[Environment variables in build environments](https://docs.aws.amazon.com/codebuild/latest/userguide/build-env-ref-env-vars.html)
+in the CodeBuild User Guide.
+
+To use the output variables in a subsequent action, you can use the `variable` method on the action:
+
+```ts
+declare const sourceArtifact: codepipeline.Artifact;
+declare const outputArtifact: codepipeline.Artifact;
+
+const commandsAction = new codepipeline_actions.CommandsAction({
+  actionName: 'Commands',
+  commands: [
+    'export MY_OUTPUT=my-key',
+  ],
+  input: sourceArtifact,
+  output: outputArtifact,
+  outputVariables: ['MY_OUTPUT', 'CODEBUILD_BUILD_ID'], // CODEBUILD_BUILD_ID is a variable defined by CodeBuild
+});
+
+// Deploy action
+const deployAction = new codepipeline_actions.S3DeployAction({
+  actionName: 'DeployAction',
+  extract: true,
+  input: outputArtifact,
+  bucket: new s3.Bucket(this, 'DeployBucket'),
+  objectKey: commandsAction.variable('MY_OUTPUT'), // the variable emitted by the Commands action
+});
+```
+
+See [the AWS documentation](https://docs.aws.amazon.com/codepipeline/latest/userguide/action-reference-Commands.html)
+for more details about using Commands action in CodePipeline.

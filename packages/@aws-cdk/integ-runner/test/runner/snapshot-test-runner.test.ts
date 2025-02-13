@@ -10,7 +10,7 @@ let cdkMock: MockCdkProvider;
 
 const currentCwd = process.cwd();
 beforeAll(() => {
-  process.chdir(path.join(__dirname, '../..'));
+  process.chdir(path.join(__dirname, '..', '..'));
 });
 afterAll(() => {
   process.chdir(currentCwd);
@@ -215,6 +215,5 @@ describe('IntegTest runSnapshotTests', () => {
         output: '../../does/not/exist',
       });
     });
-
   });
 });

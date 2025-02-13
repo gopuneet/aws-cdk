@@ -19,7 +19,7 @@ interface VirtualGatewayListenerCommonOptions {
    *
    * @default - 8080
    */
-  readonly port?: number
+  readonly port?: number;
 
   /**
    * The health check information for the listener
@@ -118,7 +118,6 @@ export abstract class VirtualGatewayListener {
  * Represents the properties needed to define an HTTP Listener for a VirtualGateway
  */
 class VirtualGatewayListenerImpl extends VirtualGatewayListener {
-
   constructor(private readonly protocol: Protocol,
     private readonly healthCheck: HealthCheck | undefined,
     private readonly port: number = 8080,

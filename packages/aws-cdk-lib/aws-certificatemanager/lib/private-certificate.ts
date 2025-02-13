@@ -1,8 +1,9 @@
 import { Construct } from 'constructs';
-import { ICertificate } from './certificate';
+import { ICertificate, KeyAlgorithm } from './certificate';
 import { CertificateBase } from './certificate-base';
 import { CfnCertificate } from './certificatemanager.generated';
 import * as acmpca from '../../aws-acmpca';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
 
 /**
  * Properties for your private certificate
@@ -28,6 +29,18 @@ export interface PrivateCertificateProps {
    * Private certificate authority (CA) that will be used to issue the certificate.
    */
   readonly certificateAuthority: acmpca.ICertificateAuthority;
+
+  /**
+   * Specifies the algorithm of the public and private key pair that your certificate uses to encrypt data.
+   *
+   * When you request a private PKI certificate signed by a CA from AWS Private CA, the specified signing algorithm family
+   * (RSA or ECDSA) must match the algorithm family of the CA's secret key.
+   *
+   * @see https://docs.aws.amazon.com/acm/latest/userguide/acm-certificate.html#algorithms.title
+   *
+   * @default KeyAlgorithm.RSA_2048
+   */
+  readonly keyAlgorithm?: KeyAlgorithm;
 }
 
 /**
@@ -54,11 +67,14 @@ export class PrivateCertificate extends CertificateBase implements ICertificate 
 
   constructor(scope: Construct, id: string, props: PrivateCertificateProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const cert = new CfnCertificate(this, 'Resource', {
       domainName: props.domainName,
       subjectAlternativeNames: props.subjectAlternativeNames,
       certificateAuthorityArn: props.certificateAuthority.certificateAuthorityArn,
+      keyAlgorithm: props.keyAlgorithm?.name,
     });
 
     this.certificateArn = cert.ref;

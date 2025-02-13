@@ -43,7 +43,6 @@ describe('resource', () => {
         'Type': 'MOCK',
       },
     });
-
   });
 
   test('if "anyMethod" is false, then an ANY method will not be defined', () => {
@@ -63,7 +62,6 @@ describe('resource', () => {
     Template.fromStack(stack).resourceCountIs('AWS::ApiGateway::Resource', 1);
     Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Method', { 'HttpMethod': 'GET' });
     Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Method', Match.not({ 'HttpMethod': 'ANY' }));
-
   });
 
   test('addProxy can be used on any resource to attach a proxy from that route', () => {
@@ -130,7 +128,6 @@ describe('resource', () => {
         },
       },
     });
-
   });
 
   test('if proxy is added to root, proxy methods are automatically duplicated (with integration and options)', () => {
@@ -171,7 +168,6 @@ describe('resource', () => {
       },
       OperationName: 'DeleteMe',
     });
-
   });
 
   test('if proxy is added to root, proxy methods are only added if they are not defined already on the root resource', () => {
@@ -185,7 +181,6 @@ describe('resource', () => {
     proxy.addMethod('POST');
 
     // THEN
-
   });
 
   test('url for a resource', () => {
@@ -197,6 +192,7 @@ describe('resource', () => {
     const aResource = api.root.addResource('a');
     const cResource = aResource.addResource('b').addResource('c');
     const colonResource = cResource.addResource('d:e');
+    const dollarResource = cResource.addResource('$d');
 
     // THEN
     expect(stack.resolve(api.urlForPath(aResource.path))).toEqual({
@@ -247,7 +243,22 @@ describe('resource', () => {
         ],
       ],
     });
-
+    expect(stack.resolve(api.urlForPath(dollarResource.path))).toEqual({
+      'Fn::Join': [
+        '',
+        [
+          'https://',
+          { Ref: 'apiC8550315' },
+          '.execute-api.',
+          { Ref: 'AWS::Region' },
+          '.',
+          { Ref: 'AWS::URLSuffix' },
+          '/',
+          { Ref: 'apiDeploymentStageprod896C8101' },
+          '/a/b/c/$d',
+        ],
+      ],
+    });
   });
 
   test('fromResourceAttributes()', () => {
@@ -272,7 +283,6 @@ describe('resource', () => {
   });
 
   describe('getResource', () => {
-
     describe('root resource', () => {
       test('returns undefined if not found', () => {
         // GIVEN
@@ -281,7 +291,6 @@ describe('resource', () => {
 
         // THEN
         expect(api.root.getResource('boom')).toBeUndefined();
-
       });
 
       test('returns the resource if found', () => {
@@ -296,7 +305,6 @@ describe('resource', () => {
         // THEN
         expect(api.root.getResource('hello')).toEqual(r1);
         expect(api.root.getResource('world')).toEqual(r2);
-
       });
 
       test('returns the resource even if it was created using "new"', () => {
@@ -312,13 +320,10 @@ describe('resource', () => {
 
         // THEN
         expect(api.root.getResource('yello')).toEqual(r1);
-
       });
-
     });
 
     describe('non-root', () => {
-
       test('returns undefined if not found', () => {
         // GIVEN
         const stack = new Stack();
@@ -327,7 +332,6 @@ describe('resource', () => {
 
         // THEN
         expect(res.getResource('child-of-boom')).toBeUndefined();
-
       });
 
       test('returns the resource if found', () => {
@@ -343,7 +347,6 @@ describe('resource', () => {
         // THEN
         expect(child.getResource('hello')).toEqual(r1);
         expect(child.getResource('world')).toEqual(r2);
-
       });
 
       test('returns the resource even if created with "new"', () => {
@@ -363,12 +366,10 @@ describe('resource', () => {
         // THEN
         expect(child.getResource('hello')).toEqual(r1);
         expect(child.getResource('outside-world')).toEqual(r2);
-
       });
     });
 
     describe('resourceForPath', () => {
-
       test('empty path or "/" (on root) returns this', () => {
         // GIVEN
         const stack = new Stack();
@@ -378,7 +379,6 @@ describe('resource', () => {
         expect(api.root.resourceForPath('')).toEqual(api.root);
         expect(api.root.resourceForPath('/')).toEqual(api.root);
         expect(api.root.resourceForPath('///')).toEqual(api.root);
-
       });
 
       test('returns a resource for that path', () => {
@@ -391,7 +391,6 @@ describe('resource', () => {
 
         // THEN
         expect(resource.path).toEqual('/boom/trach');
-
       });
 
       test('resources not created if not needed', () => {
@@ -414,9 +413,7 @@ describe('resource', () => {
         const bam2 = api.root.resourceForPath('/boom/bam');
         expect(bam1).toBe(bam2);
         expect(bam1.parentResource!.path).toEqual('/boom');
-
       });
-
     });
   });
 
@@ -473,5 +470,4 @@ describe('resource', () => {
       },
     }));
   });
-
 });

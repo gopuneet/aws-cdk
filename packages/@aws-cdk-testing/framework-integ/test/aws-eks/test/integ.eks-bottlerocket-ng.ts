@@ -8,7 +8,6 @@ import * as eks from 'aws-cdk-lib/aws-eks';
 import { NodegroupAmiType } from 'aws-cdk-lib/aws-eks';
 
 class EksClusterStack extends Stack {
-
   private cluster: eks.Cluster;
   private vpc: ec2.IVpc;
 
@@ -45,5 +44,7 @@ const app = new App();
 const stack = new EksClusterStack(app, 'aws-cdk-eks-cluster-bottlerocket-ng-test');
 new integ.IntegTest(app, 'aws-cdk-eks-cluster-bottlerocket-ng', {
   testCases: [stack],
+  // Test includes assets that are updated weekly. If not disabled, the upgrade PR will fail.
+  diffAssets: false,
 });
 app.synth();

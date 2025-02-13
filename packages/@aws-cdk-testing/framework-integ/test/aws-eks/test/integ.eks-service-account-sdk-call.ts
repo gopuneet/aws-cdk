@@ -5,12 +5,17 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import { App, Stack, CfnOutput, Duration } from 'aws-cdk-lib';
 import * as integ from '@aws-cdk/integ-tests-alpha';
 import * as cdk8s from 'cdk8s';
-import * as kplus from 'cdk8s-plus-24';
+import * as kplus from 'cdk8s-plus-27';
 import { BucketPinger } from './bucket-pinger/bucket-pinger';
 import * as eks from 'aws-cdk-lib/aws-eks';
 import { getClusterVersionConfig } from './integ-tests-kubernetes-version';
+import { IAM_OIDC_REJECT_UNAUTHORIZED_CONNECTIONS } from 'aws-cdk-lib/cx-api';
 
-const app = new App();
+const app = new App({
+  postCliContext: {
+    [IAM_OIDC_REJECT_UNAUTHORIZED_CONNECTIONS]: false,
+  },
+});
 const stack = new Stack(app, 'aws-eks-service-account-sdk-calls-test');
 
 // this bucket gets created by a kubernetes pod.
@@ -18,6 +23,7 @@ const bucketName = `eks-bucket-${stack.account}-${stack.region}`;
 
 const dockerImage = new ecrAssets.DockerImageAsset(stack, 'sdk-call-making-docker-image', {
   directory: path.join(__dirname, 'sdk-call-integ-test-docker-app/app'),
+  cacheDisabled: true,
 });
 
 // just need one nat gateway to simplify the test
@@ -77,6 +83,7 @@ new CfnOutput(stack, 'PingerResponse', {
 
 new integ.IntegTest(app, 'aws-cdk-eks-service-account-sdk-call', {
   testCases: [stack],
+  diffAssets: false, // otherwise this test will block every dependency upgrade PR
 });
 
 app.synth();

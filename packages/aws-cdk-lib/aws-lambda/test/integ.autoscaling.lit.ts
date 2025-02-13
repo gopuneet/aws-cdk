@@ -4,10 +4,10 @@ import { LAMBDA_RECOGNIZE_LAYER_VERSION } from '../../cx-api';
 import * as lambda from '../lib';
 
 /**
-* Stack verification steps:
-* aws application-autoscaling describe-scalable-targets --service-namespace lambda --resource-ids function:<function name>:prod
-* has a minCapacity of 3 and maxCapacity of 50
-*/
+ * Stack verification steps:
+ * aws application-autoscaling describe-scalable-targets --service-namespace lambda --resource-ids function:<function name>:prod
+ * has a minCapacity of 3 and maxCapacity of 50
+ */
 class TestStack extends cdk.Stack {
   constructor(scope: cdk.App, id: string) {
     super(scope, id);
@@ -15,7 +15,7 @@ class TestStack extends cdk.Stack {
     const fn = new lambda.Function(this, 'MyLambda', {
       code: new lambda.InlineCode('exports.handler = async () => { console.log(\'hello world\'); };'),
       handler: 'index.handler',
-      runtime: lambda.Runtime.NODEJS_14_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
     });
 
     const version = fn.currentVersion;

@@ -9,7 +9,7 @@ export interface TlsCertificateConfig {
   /**
    * The CFN shape for a TLS certificate
    */
-  readonly tlsCertificate: CfnVirtualNode.ListenerTlsCertificateProperty,
+  readonly tlsCertificate: CfnVirtualNode.ListenerTlsCertificateProperty;
 }
 
 /**
@@ -41,7 +41,6 @@ export abstract class TlsCertificate {
    * Returns TLS certificate based provider.
    */
   public abstract bind(_scope: Construct): TlsCertificateConfig;
-
 }
 
 /**

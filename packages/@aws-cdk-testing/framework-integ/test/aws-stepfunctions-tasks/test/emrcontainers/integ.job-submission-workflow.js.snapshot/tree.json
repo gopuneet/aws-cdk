@@ -8,6 +8,65 @@
         "id": "aws-stepfunctions-tasks-emr-containers-all-services-test",
         "path": "aws-stepfunctions-tasks-emr-containers-all-services-test",
         "children": {
+          "KubectlLayer": {
+            "id": "KubectlLayer",
+            "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/KubectlLayer",
+            "children": {
+              "Code": {
+                "id": "Code",
+                "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/KubectlLayer/Code",
+                "children": {
+                  "Stage": {
+                    "id": "Stage",
+                    "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/KubectlLayer/Code/Stage",
+                    "constructInfo": {
+                      "fqn": "aws-cdk-lib.AssetStaging",
+                      "version": "0.0.0"
+                    }
+                  },
+                  "AssetBucket": {
+                    "id": "AssetBucket",
+                    "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/KubectlLayer/Code/AssetBucket",
+                    "constructInfo": {
+                      "fqn": "aws-cdk-lib.aws_s3.BucketBase",
+                      "version": "0.0.0",
+                      "metadata": []
+                    }
+                  }
+                },
+                "constructInfo": {
+                  "fqn": "aws-cdk-lib.aws_s3_assets.Asset",
+                  "version": "0.0.0"
+                }
+              },
+              "Resource": {
+                "id": "Resource",
+                "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/KubectlLayer/Resource",
+                "attributes": {
+                  "aws:cdk:cloudformation:type": "AWS::Lambda::LayerVersion",
+                  "aws:cdk:cloudformation:props": {
+                    "content": {
+                      "s3Bucket": {
+                        "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
+                      },
+                      "s3Key": "f3c812b299b0759c937b41e39d3451f5cc61279c2ec9ee791fac08ba1e56508b.zip"
+                    },
+                    "description": "/opt/kubectl/kubectl 1.31.0; /opt/helm/helm 3.16.1",
+                    "licenseInfo": "Apache-2.0"
+                  }
+                },
+                "constructInfo": {
+                  "fqn": "aws-cdk-lib.aws_lambda.CfnLayerVersion",
+                  "version": "0.0.0"
+                }
+              }
+            },
+            "constructInfo": {
+              "fqn": "@aws-cdk/lambda-layer-kubectl-v31.KubectlV31Layer",
+              "version": "2.0.0",
+              "metadata": []
+            }
+          },
           "integration-test-eks-cluster": {
             "id": "integration-test-eks-cluster",
             "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/integration-test-eks-cluster",
@@ -49,9 +108,6 @@
                         "attributes": {
                           "aws:cdk:cloudformation:type": "AWS::EC2::Subnet",
                           "aws:cdk:cloudformation:props": {
-                            "vpcId": {
-                              "Ref": "integrationtesteksclusterDefaultVpc395E1A86"
-                            },
                             "availabilityZone": {
                               "Fn::Select": [
                                 0,
@@ -79,7 +135,10 @@
                                 "key": "Name",
                                 "value": "aws-stepfunctions-tasks-emr-containers-all-services-test/integration-test-eks-cluster/DefaultVpc/PublicSubnet1"
                               }
-                            ]
+                            ],
+                            "vpcId": {
+                              "Ref": "integrationtesteksclusterDefaultVpc395E1A86"
+                            }
                           }
                         },
                         "constructInfo": {
@@ -92,7 +151,8 @@
                         "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/integration-test-eks-cluster/DefaultVpc/PublicSubnet1/Acl",
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.Resource",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       },
                       "RouteTable": {
@@ -101,9 +161,6 @@
                         "attributes": {
                           "aws:cdk:cloudformation:type": "AWS::EC2::RouteTable",
                           "aws:cdk:cloudformation:props": {
-                            "vpcId": {
-                              "Ref": "integrationtesteksclusterDefaultVpc395E1A86"
-                            },
                             "tags": [
                               {
                                 "key": "kubernetes.io/role/elb",
@@ -113,7 +170,10 @@
                                 "key": "Name",
                                 "value": "aws-stepfunctions-tasks-emr-containers-all-services-test/integration-test-eks-cluster/DefaultVpc/PublicSubnet1"
                               }
-                            ]
+                            ],
+                            "vpcId": {
+                              "Ref": "integrationtesteksclusterDefaultVpc395E1A86"
+                            }
                           }
                         },
                         "constructInfo": {
@@ -146,12 +206,12 @@
                         "attributes": {
                           "aws:cdk:cloudformation:type": "AWS::EC2::Route",
                           "aws:cdk:cloudformation:props": {
-                            "routeTableId": {
-                              "Ref": "integrationtesteksclusterDefaultVpcPublicSubnet1RouteTable1D5A7569"
-                            },
                             "destinationCidrBlock": "0.0.0.0/0",
                             "gatewayId": {
                               "Ref": "integrationtesteksclusterDefaultVpcIGW9ADAFE6F"
+                            },
+                            "routeTableId": {
+                              "Ref": "integrationtesteksclusterDefaultVpcPublicSubnet1RouteTable1D5A7569"
                             }
                           }
                         },
@@ -190,14 +250,14 @@
                         "attributes": {
                           "aws:cdk:cloudformation:type": "AWS::EC2::NatGateway",
                           "aws:cdk:cloudformation:props": {
-                            "subnetId": {
-                              "Ref": "integrationtesteksclusterDefaultVpcPublicSubnet1Subnet58061317"
-                            },
                             "allocationId": {
                               "Fn::GetAtt": [
                                 "integrationtesteksclusterDefaultVpcPublicSubnet1EIP62A0A17B",
                                 "AllocationId"
                               ]
+                            },
+                            "subnetId": {
+                              "Ref": "integrationtesteksclusterDefaultVpcPublicSubnet1Subnet58061317"
                             },
                             "tags": [
                               {
@@ -219,7 +279,8 @@
                     },
                     "constructInfo": {
                       "fqn": "aws-cdk-lib.aws_ec2.PublicSubnet",
-                      "version": "0.0.0"
+                      "version": "0.0.0",
+                      "metadata": []
                     }
                   },
                   "PublicSubnet2": {
@@ -232,9 +293,6 @@
                         "attributes": {
                           "aws:cdk:cloudformation:type": "AWS::EC2::Subnet",
                           "aws:cdk:cloudformation:props": {
-                            "vpcId": {
-                              "Ref": "integrationtesteksclusterDefaultVpc395E1A86"
-                            },
                             "availabilityZone": {
                               "Fn::Select": [
                                 1,
@@ -262,7 +320,10 @@
                                 "key": "Name",
                                 "value": "aws-stepfunctions-tasks-emr-containers-all-services-test/integration-test-eks-cluster/DefaultVpc/PublicSubnet2"
                               }
-                            ]
+                            ],
+                            "vpcId": {
+                              "Ref": "integrationtesteksclusterDefaultVpc395E1A86"
+                            }
                           }
                         },
                         "constructInfo": {
@@ -275,7 +336,8 @@
                         "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/integration-test-eks-cluster/DefaultVpc/PublicSubnet2/Acl",
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.Resource",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       },
                       "RouteTable": {
@@ -284,9 +346,6 @@
                         "attributes": {
                           "aws:cdk:cloudformation:type": "AWS::EC2::RouteTable",
                           "aws:cdk:cloudformation:props": {
-                            "vpcId": {
-                              "Ref": "integrationtesteksclusterDefaultVpc395E1A86"
-                            },
                             "tags": [
                               {
                                 "key": "kubernetes.io/role/elb",
@@ -296,7 +355,10 @@
                                 "key": "Name",
                                 "value": "aws-stepfunctions-tasks-emr-containers-all-services-test/integration-test-eks-cluster/DefaultVpc/PublicSubnet2"
                               }
-                            ]
+                            ],
+                            "vpcId": {
+                              "Ref": "integrationtesteksclusterDefaultVpc395E1A86"
+                            }
                           }
                         },
                         "constructInfo": {
@@ -329,12 +391,12 @@
                         "attributes": {
                           "aws:cdk:cloudformation:type": "AWS::EC2::Route",
                           "aws:cdk:cloudformation:props": {
-                            "routeTableId": {
-                              "Ref": "integrationtesteksclusterDefaultVpcPublicSubnet2RouteTableA4C7B327"
-                            },
                             "destinationCidrBlock": "0.0.0.0/0",
                             "gatewayId": {
                               "Ref": "integrationtesteksclusterDefaultVpcIGW9ADAFE6F"
+                            },
+                            "routeTableId": {
+                              "Ref": "integrationtesteksclusterDefaultVpcPublicSubnet2RouteTableA4C7B327"
                             }
                           }
                         },
@@ -373,14 +435,14 @@
                         "attributes": {
                           "aws:cdk:cloudformation:type": "AWS::EC2::NatGateway",
                           "aws:cdk:cloudformation:props": {
-                            "subnetId": {
-                              "Ref": "integrationtesteksclusterDefaultVpcPublicSubnet2Subnet68EAAF11"
-                            },
                             "allocationId": {
                               "Fn::GetAtt": [
                                 "integrationtesteksclusterDefaultVpcPublicSubnet2EIPFC53AC43",
                                 "AllocationId"
                               ]
+                            },
+                            "subnetId": {
+                              "Ref": "integrationtesteksclusterDefaultVpcPublicSubnet2Subnet68EAAF11"
                             },
                             "tags": [
                               {
@@ -402,7 +464,8 @@
                     },
                     "constructInfo": {
                       "fqn": "aws-cdk-lib.aws_ec2.PublicSubnet",
-                      "version": "0.0.0"
+                      "version": "0.0.0",
+                      "metadata": []
                     }
                   },
                   "PrivateSubnet1": {
@@ -415,9 +478,6 @@
                         "attributes": {
                           "aws:cdk:cloudformation:type": "AWS::EC2::Subnet",
                           "aws:cdk:cloudformation:props": {
-                            "vpcId": {
-                              "Ref": "integrationtesteksclusterDefaultVpc395E1A86"
-                            },
                             "availabilityZone": {
                               "Fn::Select": [
                                 0,
@@ -445,7 +505,10 @@
                                 "key": "Name",
                                 "value": "aws-stepfunctions-tasks-emr-containers-all-services-test/integration-test-eks-cluster/DefaultVpc/PrivateSubnet1"
                               }
-                            ]
+                            ],
+                            "vpcId": {
+                              "Ref": "integrationtesteksclusterDefaultVpc395E1A86"
+                            }
                           }
                         },
                         "constructInfo": {
@@ -458,7 +521,8 @@
                         "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/integration-test-eks-cluster/DefaultVpc/PrivateSubnet1/Acl",
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.Resource",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       },
                       "RouteTable": {
@@ -467,9 +531,6 @@
                         "attributes": {
                           "aws:cdk:cloudformation:type": "AWS::EC2::RouteTable",
                           "aws:cdk:cloudformation:props": {
-                            "vpcId": {
-                              "Ref": "integrationtesteksclusterDefaultVpc395E1A86"
-                            },
                             "tags": [
                               {
                                 "key": "kubernetes.io/role/internal-elb",
@@ -479,7 +540,10 @@
                                 "key": "Name",
                                 "value": "aws-stepfunctions-tasks-emr-containers-all-services-test/integration-test-eks-cluster/DefaultVpc/PrivateSubnet1"
                               }
-                            ]
+                            ],
+                            "vpcId": {
+                              "Ref": "integrationtesteksclusterDefaultVpc395E1A86"
+                            }
                           }
                         },
                         "constructInfo": {
@@ -512,12 +576,12 @@
                         "attributes": {
                           "aws:cdk:cloudformation:type": "AWS::EC2::Route",
                           "aws:cdk:cloudformation:props": {
-                            "routeTableId": {
-                              "Ref": "integrationtesteksclusterDefaultVpcPrivateSubnet1RouteTable4A47F4AC"
-                            },
                             "destinationCidrBlock": "0.0.0.0/0",
                             "natGatewayId": {
                               "Ref": "integrationtesteksclusterDefaultVpcPublicSubnet1NATGatewayC9C984F9"
+                            },
+                            "routeTableId": {
+                              "Ref": "integrationtesteksclusterDefaultVpcPrivateSubnet1RouteTable4A47F4AC"
                             }
                           }
                         },
@@ -529,7 +593,8 @@
                     },
                     "constructInfo": {
                       "fqn": "aws-cdk-lib.aws_ec2.PrivateSubnet",
-                      "version": "0.0.0"
+                      "version": "0.0.0",
+                      "metadata": []
                     }
                   },
                   "PrivateSubnet2": {
@@ -542,9 +607,6 @@
                         "attributes": {
                           "aws:cdk:cloudformation:type": "AWS::EC2::Subnet",
                           "aws:cdk:cloudformation:props": {
-                            "vpcId": {
-                              "Ref": "integrationtesteksclusterDefaultVpc395E1A86"
-                            },
                             "availabilityZone": {
                               "Fn::Select": [
                                 1,
@@ -572,7 +634,10 @@
                                 "key": "Name",
                                 "value": "aws-stepfunctions-tasks-emr-containers-all-services-test/integration-test-eks-cluster/DefaultVpc/PrivateSubnet2"
                               }
-                            ]
+                            ],
+                            "vpcId": {
+                              "Ref": "integrationtesteksclusterDefaultVpc395E1A86"
+                            }
                           }
                         },
                         "constructInfo": {
@@ -585,7 +650,8 @@
                         "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/integration-test-eks-cluster/DefaultVpc/PrivateSubnet2/Acl",
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.Resource",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       },
                       "RouteTable": {
@@ -594,9 +660,6 @@
                         "attributes": {
                           "aws:cdk:cloudformation:type": "AWS::EC2::RouteTable",
                           "aws:cdk:cloudformation:props": {
-                            "vpcId": {
-                              "Ref": "integrationtesteksclusterDefaultVpc395E1A86"
-                            },
                             "tags": [
                               {
                                 "key": "kubernetes.io/role/internal-elb",
@@ -606,7 +669,10 @@
                                 "key": "Name",
                                 "value": "aws-stepfunctions-tasks-emr-containers-all-services-test/integration-test-eks-cluster/DefaultVpc/PrivateSubnet2"
                               }
-                            ]
+                            ],
+                            "vpcId": {
+                              "Ref": "integrationtesteksclusterDefaultVpc395E1A86"
+                            }
                           }
                         },
                         "constructInfo": {
@@ -639,12 +705,12 @@
                         "attributes": {
                           "aws:cdk:cloudformation:type": "AWS::EC2::Route",
                           "aws:cdk:cloudformation:props": {
-                            "routeTableId": {
-                              "Ref": "integrationtesteksclusterDefaultVpcPrivateSubnet2RouteTableD7E59903"
-                            },
                             "destinationCidrBlock": "0.0.0.0/0",
                             "natGatewayId": {
                               "Ref": "integrationtesteksclusterDefaultVpcPublicSubnet2NATGatewayE109B761"
+                            },
+                            "routeTableId": {
+                              "Ref": "integrationtesteksclusterDefaultVpcPrivateSubnet2RouteTableD7E59903"
                             }
                           }
                         },
@@ -656,7 +722,8 @@
                     },
                     "constructInfo": {
                       "fqn": "aws-cdk-lib.aws_ec2.PrivateSubnet",
-                      "version": "0.0.0"
+                      "version": "0.0.0",
+                      "metadata": []
                     }
                   },
                   "IGW": {
@@ -684,11 +751,11 @@
                     "attributes": {
                       "aws:cdk:cloudformation:type": "AWS::EC2::VPCGatewayAttachment",
                       "aws:cdk:cloudformation:props": {
-                        "vpcId": {
-                          "Ref": "integrationtesteksclusterDefaultVpc395E1A86"
-                        },
                         "internetGatewayId": {
                           "Ref": "integrationtesteksclusterDefaultVpcIGW9ADAFE6F"
+                        },
+                        "vpcId": {
+                          "Ref": "integrationtesteksclusterDefaultVpc395E1A86"
                         }
                       }
                     },
@@ -700,7 +767,8 @@
                 },
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.aws_ec2.Vpc",
-                  "version": "0.0.0"
+                  "version": "0.0.0",
+                  "metadata": []
                 }
               },
               "KubectlHandlerRole": {
@@ -712,7 +780,8 @@
                     "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/integration-test-eks-cluster/KubectlHandlerRole/ImportKubectlHandlerRole",
                     "constructInfo": {
                       "fqn": "aws-cdk-lib.Resource",
-                      "version": "0.0.0"
+                      "version": "0.0.0",
+                      "metadata": []
                     }
                   },
                   "Resource": {
@@ -849,13 +918,15 @@
                     },
                     "constructInfo": {
                       "fqn": "aws-cdk-lib.aws_iam.Policy",
-                      "version": "0.0.0"
+                      "version": "0.0.0",
+                      "metadata": []
                     }
                   }
                 },
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.aws_iam.Role",
-                  "version": "0.0.0"
+                  "version": "0.0.0",
+                  "metadata": []
                 }
               },
               "Role": {
@@ -867,7 +938,8 @@
                     "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/integration-test-eks-cluster/Role/ImportRole",
                     "constructInfo": {
                       "fqn": "aws-cdk-lib.Resource",
-                      "version": "0.0.0"
+                      "version": "0.0.0",
+                      "metadata": []
                     }
                   },
                   "Resource": {
@@ -912,7 +984,8 @@
                 },
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.aws_iam.Role",
-                  "version": "0.0.0"
+                  "version": "0.0.0",
+                  "metadata": []
                 }
               },
               "ControlPlaneSecurityGroup": {
@@ -946,7 +1019,8 @@
                 },
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.aws_ec2.SecurityGroup",
-                  "version": "0.0.0"
+                  "version": "0.0.0",
+                  "metadata": []
                 }
               },
               "Resource": {
@@ -962,7 +1036,8 @@
                         "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/integration-test-eks-cluster/Resource/CreationRole/ImportCreationRole",
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.Resource",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       },
                       "Resource": {
@@ -1089,13 +1164,15 @@
                         },
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.aws_iam.Policy",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       }
                     },
                     "constructInfo": {
                       "fqn": "aws-cdk-lib.aws_iam.Role",
-                      "version": "0.0.0"
+                      "version": "0.0.0",
+                      "metadata": []
                     }
                   },
                   "Resource": {
@@ -1113,13 +1190,14 @@
                     },
                     "constructInfo": {
                       "fqn": "aws-cdk-lib.CustomResource",
-                      "version": "0.0.0"
+                      "version": "0.0.0",
+                      "metadata": []
                     }
                   }
                 },
                 "constructInfo": {
                   "fqn": "constructs.Construct",
-                  "version": "10.2.26"
+                  "version": "10.4.2"
                 }
               },
               "KubectlReadyBarrier": {
@@ -1135,7 +1213,8 @@
                 "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/integration-test-eks-cluster/ClusterSecurityGroup",
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.Resource",
-                  "version": "0.0.0"
+                  "version": "0.0.0",
+                  "metadata": []
                 }
               },
               "HasEcrPublic": {
@@ -1159,7 +1238,8 @@
                         "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/integration-test-eks-cluster/NodegroupDefaultCapacity/NodeGroupRole/ImportNodeGroupRole",
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.Resource",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       },
                       "Resource": {
@@ -1228,7 +1308,8 @@
                     },
                     "constructInfo": {
                       "fqn": "aws-cdk-lib.aws_iam.Role",
-                      "version": "0.0.0"
+                      "version": "0.0.0",
+                      "metadata": []
                     }
                   },
                   "Resource": {
@@ -1237,14 +1318,24 @@
                     "attributes": {
                       "aws:cdk:cloudformation:type": "AWS::EKS::Nodegroup",
                       "aws:cdk:cloudformation:props": {
+                        "amiType": "AL2_x86_64",
                         "clusterName": {
                           "Ref": "integrationtesteksclusterE5C0ED98"
                         },
+                        "forceUpdateEnabled": true,
+                        "instanceTypes": [
+                          "m5.xlarge"
+                        ],
                         "nodeRole": {
                           "Fn::GetAtt": [
                             "integrationtesteksclusterNodegroupDefaultCapacityNodeGroupRole75D45BA7",
                             "Arn"
                           ]
+                        },
+                        "scalingConfig": {
+                          "desiredSize": 3,
+                          "maxSize": 3,
+                          "minSize": 3
                         },
                         "subnets": [
                           {
@@ -1253,17 +1344,7 @@
                           {
                             "Ref": "integrationtesteksclusterDefaultVpcPrivateSubnet2Subnet0C3539A8"
                           }
-                        ],
-                        "amiType": "AL2_x86_64",
-                        "forceUpdateEnabled": true,
-                        "instanceTypes": [
-                          "m5.xlarge"
-                        ],
-                        "scalingConfig": {
-                          "desiredSize": 3,
-                          "maxSize": 3,
-                          "minSize": 3
-                        }
+                        ]
                       }
                     },
                     "constructInfo": {
@@ -1274,7 +1355,8 @@
                 },
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.aws_eks.Nodegroup",
-                  "version": "0.0.0"
+                  "version": "0.0.0",
+                  "metadata": []
                 }
               },
               "AwsAuth": {
@@ -1300,7 +1382,8 @@
                         },
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.CustomResource",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       }
                     },
@@ -1318,7 +1401,8 @@
             },
             "constructInfo": {
               "fqn": "aws-cdk-lib.aws_eks.Cluster",
-              "version": "0.0.0"
+              "version": "0.0.0",
+              "metadata": []
             }
           },
           "@aws-cdk--aws-eks.ClusterResourceProvider": {
@@ -1346,7 +1430,8 @@
                         "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/NodeProxyAgentLayer/Code/AssetBucket",
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.aws_s3.BucketBase",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       }
                     },
@@ -1365,7 +1450,7 @@
                           "s3Bucket": {
                             "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
                           },
-                          "s3Key": "75dfa9114a30421542432dcb55212f010f591a9e3bd203ae98ba3f9bedf5bb31.zip"
+                          "s3Key": "93d96d34e0d3cd20eb082652b91012b131bdc34fcf2bc16eb4170e04772fddb1.zip"
                         },
                         "description": "/opt/nodejs/node_modules/proxy-agent"
                       }
@@ -1378,6 +1463,15 @@
                 },
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.lambda_layer_node_proxy_agent.NodeProxyAgentLayer",
+                  "version": "0.0.0",
+                  "metadata": []
+                }
+              },
+              "LatestNodeRuntimeMap": {
+                "id": "LatestNodeRuntimeMap",
+                "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/LatestNodeRuntimeMap",
+                "constructInfo": {
+                  "fqn": "aws-cdk-lib.CfnMapping",
                   "version": "0.0.0"
                 }
               },
@@ -1394,7 +1488,8 @@
                         "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/OnEventHandler/ServiceRole/ImportServiceRole",
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.Resource",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       },
                       "Resource": {
@@ -1439,7 +1534,8 @@
                     },
                     "constructInfo": {
                       "fqn": "aws-cdk-lib.aws_iam.Role",
-                      "version": "0.0.0"
+                      "version": "0.0.0",
+                      "metadata": []
                     }
                   },
                   "Code": {
@@ -1459,7 +1555,8 @@
                         "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/OnEventHandler/Code/AssetBucket",
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.aws_s3.BucketBase",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       }
                     },
@@ -1478,13 +1575,7 @@
                           "s3Bucket": {
                             "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
                           },
-                          "s3Key": "baa290a08acb84544e3ce6cc3bd88d6689f5494eef7df73b7957fe9c4ef93e17.zip"
-                        },
-                        "role": {
-                          "Fn::GetAtt": [
-                            "OnEventHandlerServiceRole15A26729",
-                            "Arn"
-                          ]
+                          "s3Key": "aea9e78c19375cc11788e490fdd0d8d90a99fc5509f3ade872bff74980f89265.zip"
                         },
                         "description": "onEvent handler for EKS cluster resource provider",
                         "environment": {
@@ -1498,7 +1589,21 @@
                             "Ref": "NodeProxyAgentLayer924C1971"
                           }
                         ],
-                        "runtime": "nodejs14.x",
+                        "role": {
+                          "Fn::GetAtt": [
+                            "OnEventHandlerServiceRole15A26729",
+                            "Arn"
+                          ]
+                        },
+                        "runtime": {
+                          "Fn::FindInMap": [
+                            "LatestNodeRuntimeMap",
+                            {
+                              "Ref": "AWS::Region"
+                            },
+                            "value"
+                          ]
+                        },
                         "timeout": 60
                       }
                     },
@@ -1510,7 +1615,8 @@
                 },
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.aws_lambda.Function",
-                  "version": "0.0.0"
+                  "version": "0.0.0",
+                  "metadata": []
                 }
               },
               "IsCompleteHandler": {
@@ -1526,7 +1632,8 @@
                         "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/IsCompleteHandler/ServiceRole/ImportServiceRole",
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.Resource",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       },
                       "Resource": {
@@ -1571,7 +1678,8 @@
                     },
                     "constructInfo": {
                       "fqn": "aws-cdk-lib.aws_iam.Role",
-                      "version": "0.0.0"
+                      "version": "0.0.0",
+                      "metadata": []
                     }
                   },
                   "Code": {
@@ -1591,7 +1699,8 @@
                         "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/IsCompleteHandler/Code/AssetBucket",
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.aws_s3.BucketBase",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       }
                     },
@@ -1610,13 +1719,7 @@
                           "s3Bucket": {
                             "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
                           },
-                          "s3Key": "baa290a08acb84544e3ce6cc3bd88d6689f5494eef7df73b7957fe9c4ef93e17.zip"
-                        },
-                        "role": {
-                          "Fn::GetAtt": [
-                            "IsCompleteHandlerServiceRole5810CC58",
-                            "Arn"
-                          ]
+                          "s3Key": "aea9e78c19375cc11788e490fdd0d8d90a99fc5509f3ade872bff74980f89265.zip"
                         },
                         "description": "isComplete handler for EKS cluster resource provider",
                         "environment": {
@@ -1630,7 +1733,21 @@
                             "Ref": "NodeProxyAgentLayer924C1971"
                           }
                         ],
-                        "runtime": "nodejs14.x",
+                        "role": {
+                          "Fn::GetAtt": [
+                            "IsCompleteHandlerServiceRole5810CC58",
+                            "Arn"
+                          ]
+                        },
+                        "runtime": {
+                          "Fn::FindInMap": [
+                            "LatestNodeRuntimeMap",
+                            {
+                              "Ref": "AWS::Region"
+                            },
+                            "value"
+                          ]
+                        },
                         "timeout": 60
                       }
                     },
@@ -1642,7 +1759,8 @@
                 },
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.aws_lambda.Function",
-                  "version": "0.0.0"
+                  "version": "0.0.0",
+                  "metadata": []
                 }
               },
               "Provider": {
@@ -1662,7 +1780,8 @@
                             "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/Provider/framework-onEvent/ServiceRole/ImportServiceRole",
                             "constructInfo": {
                               "fqn": "aws-cdk-lib.Resource",
-                              "version": "0.0.0"
+                              "version": "0.0.0",
+                              "metadata": []
                             }
                           },
                           "Resource": {
@@ -1763,6 +1882,24 @@
                                           ]
                                         },
                                         {
+                                          "Action": "lambda:GetFunction",
+                                          "Effect": "Allow",
+                                          "Resource": [
+                                            {
+                                              "Fn::GetAtt": [
+                                                "IsCompleteHandler7073F4DA",
+                                                "Arn"
+                                              ]
+                                            },
+                                            {
+                                              "Fn::GetAtt": [
+                                                "OnEventHandler42BEBAE0",
+                                                "Arn"
+                                              ]
+                                            }
+                                          ]
+                                        },
+                                        {
                                           "Action": "states:StartExecution",
                                           "Effect": "Allow",
                                           "Resource": {
@@ -1788,13 +1925,15 @@
                             },
                             "constructInfo": {
                               "fqn": "aws-cdk-lib.aws_iam.Policy",
-                              "version": "0.0.0"
+                              "version": "0.0.0",
+                              "metadata": []
                             }
                           }
                         },
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.aws_iam.Role",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       },
                       "Code": {
@@ -1814,7 +1953,8 @@
                             "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/Provider/framework-onEvent/Code/AssetBucket",
                             "constructInfo": {
                               "fqn": "aws-cdk-lib.aws_s3.BucketBase",
-                              "version": "0.0.0"
+                              "version": "0.0.0",
+                              "metadata": []
                             }
                           }
                         },
@@ -1833,13 +1973,7 @@
                               "s3Bucket": {
                                 "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
                               },
-                              "s3Key": "45017ac1fb5b50dac36a255c328b0fe125f18a8e6d3689e188eab5e3a1bf8146.zip"
-                            },
-                            "role": {
-                              "Fn::GetAtt": [
-                                "ProviderframeworkonEventServiceRole9FF04296",
-                                "Arn"
-                              ]
+                              "s3Key": "39472b1c2875cf306d4ba429aeccdd34cb49bcf59dbde81f7e6b6cb9deac23a6.zip"
                             },
                             "description": "AWS CDK resource provider framework - onEvent (aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/Provider)",
                             "environment": {
@@ -1862,7 +1996,21 @@
                               }
                             },
                             "handler": "framework.onEvent",
-                            "runtime": "nodejs14.x",
+                            "role": {
+                              "Fn::GetAtt": [
+                                "ProviderframeworkonEventServiceRole9FF04296",
+                                "Arn"
+                              ]
+                            },
+                            "runtime": {
+                              "Fn::FindInMap": [
+                                "LatestNodeRuntimeMap",
+                                {
+                                  "Ref": "AWS::Region"
+                                },
+                                "value"
+                              ]
+                            },
                             "timeout": 900
                           }
                         },
@@ -1874,7 +2022,8 @@
                     },
                     "constructInfo": {
                       "fqn": "aws-cdk-lib.aws_lambda.Function",
-                      "version": "0.0.0"
+                      "version": "0.0.0",
+                      "metadata": []
                     }
                   },
                   "framework-isComplete": {
@@ -1890,7 +2039,8 @@
                             "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/Provider/framework-isComplete/ServiceRole/ImportServiceRole",
                             "constructInfo": {
                               "fqn": "aws-cdk-lib.Resource",
-                              "version": "0.0.0"
+                              "version": "0.0.0",
+                              "metadata": []
                             }
                           },
                           "Resource": {
@@ -1989,6 +2139,24 @@
                                               ]
                                             }
                                           ]
+                                        },
+                                        {
+                                          "Action": "lambda:GetFunction",
+                                          "Effect": "Allow",
+                                          "Resource": [
+                                            {
+                                              "Fn::GetAtt": [
+                                                "IsCompleteHandler7073F4DA",
+                                                "Arn"
+                                              ]
+                                            },
+                                            {
+                                              "Fn::GetAtt": [
+                                                "OnEventHandler42BEBAE0",
+                                                "Arn"
+                                              ]
+                                            }
+                                          ]
                                         }
                                       ],
                                       "Version": "2012-10-17"
@@ -2009,13 +2177,15 @@
                             },
                             "constructInfo": {
                               "fqn": "aws-cdk-lib.aws_iam.Policy",
-                              "version": "0.0.0"
+                              "version": "0.0.0",
+                              "metadata": []
                             }
                           }
                         },
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.aws_iam.Role",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       },
                       "Code": {
@@ -2035,7 +2205,8 @@
                             "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/Provider/framework-isComplete/Code/AssetBucket",
                             "constructInfo": {
                               "fqn": "aws-cdk-lib.aws_s3.BucketBase",
-                              "version": "0.0.0"
+                              "version": "0.0.0",
+                              "metadata": []
                             }
                           }
                         },
@@ -2054,13 +2225,7 @@
                               "s3Bucket": {
                                 "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
                               },
-                              "s3Key": "45017ac1fb5b50dac36a255c328b0fe125f18a8e6d3689e188eab5e3a1bf8146.zip"
-                            },
-                            "role": {
-                              "Fn::GetAtt": [
-                                "ProviderframeworkisCompleteServiceRoleB1087139",
-                                "Arn"
-                              ]
+                              "s3Key": "39472b1c2875cf306d4ba429aeccdd34cb49bcf59dbde81f7e6b6cb9deac23a6.zip"
                             },
                             "description": "AWS CDK resource provider framework - isComplete (aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/Provider)",
                             "environment": {
@@ -2080,7 +2245,21 @@
                               }
                             },
                             "handler": "framework.isComplete",
-                            "runtime": "nodejs14.x",
+                            "role": {
+                              "Fn::GetAtt": [
+                                "ProviderframeworkisCompleteServiceRoleB1087139",
+                                "Arn"
+                              ]
+                            },
+                            "runtime": {
+                              "Fn::FindInMap": [
+                                "LatestNodeRuntimeMap",
+                                {
+                                  "Ref": "AWS::Region"
+                                },
+                                "value"
+                              ]
+                            },
                             "timeout": 900
                           }
                         },
@@ -2092,7 +2271,8 @@
                     },
                     "constructInfo": {
                       "fqn": "aws-cdk-lib.aws_lambda.Function",
-                      "version": "0.0.0"
+                      "version": "0.0.0",
+                      "metadata": []
                     }
                   },
                   "framework-onTimeout": {
@@ -2108,7 +2288,8 @@
                             "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/Provider/framework-onTimeout/ServiceRole/ImportServiceRole",
                             "constructInfo": {
                               "fqn": "aws-cdk-lib.Resource",
-                              "version": "0.0.0"
+                              "version": "0.0.0",
+                              "metadata": []
                             }
                           },
                           "Resource": {
@@ -2207,6 +2388,24 @@
                                               ]
                                             }
                                           ]
+                                        },
+                                        {
+                                          "Action": "lambda:GetFunction",
+                                          "Effect": "Allow",
+                                          "Resource": [
+                                            {
+                                              "Fn::GetAtt": [
+                                                "IsCompleteHandler7073F4DA",
+                                                "Arn"
+                                              ]
+                                            },
+                                            {
+                                              "Fn::GetAtt": [
+                                                "OnEventHandler42BEBAE0",
+                                                "Arn"
+                                              ]
+                                            }
+                                          ]
                                         }
                                       ],
                                       "Version": "2012-10-17"
@@ -2227,13 +2426,15 @@
                             },
                             "constructInfo": {
                               "fqn": "aws-cdk-lib.aws_iam.Policy",
-                              "version": "0.0.0"
+                              "version": "0.0.0",
+                              "metadata": []
                             }
                           }
                         },
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.aws_iam.Role",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       },
                       "Code": {
@@ -2253,7 +2454,8 @@
                             "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/Provider/framework-onTimeout/Code/AssetBucket",
                             "constructInfo": {
                               "fqn": "aws-cdk-lib.aws_s3.BucketBase",
-                              "version": "0.0.0"
+                              "version": "0.0.0",
+                              "metadata": []
                             }
                           }
                         },
@@ -2272,13 +2474,7 @@
                               "s3Bucket": {
                                 "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
                               },
-                              "s3Key": "45017ac1fb5b50dac36a255c328b0fe125f18a8e6d3689e188eab5e3a1bf8146.zip"
-                            },
-                            "role": {
-                              "Fn::GetAtt": [
-                                "ProviderframeworkonTimeoutServiceRole28643D26",
-                                "Arn"
-                              ]
+                              "s3Key": "39472b1c2875cf306d4ba429aeccdd34cb49bcf59dbde81f7e6b6cb9deac23a6.zip"
                             },
                             "description": "AWS CDK resource provider framework - onTimeout (aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/Provider)",
                             "environment": {
@@ -2298,7 +2494,21 @@
                               }
                             },
                             "handler": "framework.onTimeout",
-                            "runtime": "nodejs14.x",
+                            "role": {
+                              "Fn::GetAtt": [
+                                "ProviderframeworkonTimeoutServiceRole28643D26",
+                                "Arn"
+                              ]
+                            },
+                            "runtime": {
+                              "Fn::FindInMap": [
+                                "LatestNodeRuntimeMap",
+                                {
+                                  "Ref": "AWS::Region"
+                                },
+                                "value"
+                              ]
+                            },
                             "timeout": 900
                           }
                         },
@@ -2310,7 +2520,8 @@
                     },
                     "constructInfo": {
                       "fqn": "aws-cdk-lib.aws_lambda.Function",
-                      "version": "0.0.0"
+                      "version": "0.0.0",
+                      "metadata": []
                     }
                   },
                   "waiter-state-machine": {
@@ -2326,7 +2537,8 @@
                             "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/Provider/waiter-state-machine/Role/ImportRole",
                             "constructInfo": {
                               "fqn": "aws-cdk-lib.Resource",
-                              "version": "0.0.0"
+                              "version": "0.0.0",
+                              "metadata": []
                             }
                           },
                           "Resource": {
@@ -2411,6 +2623,22 @@
                                               ]
                                             }
                                           ]
+                                        },
+                                        {
+                                          "Action": [
+                                            "logs:CreateLogDelivery",
+                                            "logs:CreateLogStream",
+                                            "logs:DeleteLogDelivery",
+                                            "logs:DescribeLogGroups",
+                                            "logs:DescribeResourcePolicies",
+                                            "logs:GetLogDelivery",
+                                            "logs:ListLogDeliveries",
+                                            "logs:PutLogEvents",
+                                            "logs:PutResourcePolicy",
+                                            "logs:UpdateLogDelivery"
+                                          ],
+                                          "Effect": "Allow",
+                                          "Resource": "*"
                                         }
                                       ],
                                       "Version": "2012-10-17"
@@ -2431,27 +2659,115 @@
                             },
                             "constructInfo": {
                               "fqn": "aws-cdk-lib.aws_iam.Policy",
-                              "version": "0.0.0"
+                              "version": "0.0.0",
+                              "metadata": []
                             }
                           }
                         },
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.aws_iam.Role",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
+                        }
+                      },
+                      "LogGroup": {
+                        "id": "LogGroup",
+                        "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/Provider/waiter-state-machine/LogGroup",
+                        "children": {
+                          "Resource": {
+                            "id": "Resource",
+                            "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/Provider/waiter-state-machine/LogGroup/Resource",
+                            "attributes": {
+                              "aws:cdk:cloudformation:type": "AWS::Logs::LogGroup",
+                              "aws:cdk:cloudformation:props": {
+                                "logGroupName": {
+                                  "Fn::Join": [
+                                    "",
+                                    [
+                                      "/aws/vendedlogs/states/waiter-state-machine-",
+                                      {
+                                        "Ref": "ProviderframeworkisComplete26D7B0CB"
+                                      },
+                                      "-c8b89d0ab9cc71cc4a7d4562892834e09e7eebeea8"
+                                    ]
+                                  ]
+                                },
+                                "retentionInDays": 731
+                              }
+                            },
+                            "constructInfo": {
+                              "fqn": "aws-cdk-lib.aws_logs.CfnLogGroup",
+                              "version": "0.0.0"
+                            }
+                          }
+                        },
+                        "constructInfo": {
+                          "fqn": "aws-cdk-lib.aws_logs.LogGroup",
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       },
                       "Resource": {
                         "id": "Resource",
                         "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.ClusterResourceProvider/Provider/waiter-state-machine/Resource",
+                        "attributes": {
+                          "aws:cdk:cloudformation:type": "AWS::StepFunctions::StateMachine",
+                          "aws:cdk:cloudformation:props": {
+                            "definitionString": {
+                              "Fn::Join": [
+                                "",
+                                [
+                                  "{\"StartAt\":\"framework-isComplete-task\",\"States\":{\"framework-isComplete-task\":{\"End\":true,\"Retry\":[{\"ErrorEquals\":[\"States.ALL\"],\"IntervalSeconds\":60,\"MaxAttempts\":60,\"BackoffRate\":1}],\"Catch\":[{\"ErrorEquals\":[\"States.ALL\"],\"Next\":\"framework-onTimeout-task\"}],\"Type\":\"Task\",\"Resource\":\"",
+                                  {
+                                    "Fn::GetAtt": [
+                                      "ProviderframeworkisComplete26D7B0CB",
+                                      "Arn"
+                                    ]
+                                  },
+                                  "\"},\"framework-onTimeout-task\":{\"End\":true,\"Type\":\"Task\",\"Resource\":\"",
+                                  {
+                                    "Fn::GetAtt": [
+                                      "ProviderframeworkonTimeout0B47CA38",
+                                      "Arn"
+                                    ]
+                                  },
+                                  "\"}}}"
+                                ]
+                              ]
+                            },
+                            "loggingConfiguration": {
+                              "destinations": [
+                                {
+                                  "cloudWatchLogsLogGroup": {
+                                    "logGroupArn": {
+                                      "Fn::GetAtt": [
+                                        "ProviderwaiterstatemachineLogGroupDD693A98",
+                                        "Arn"
+                                      ]
+                                    }
+                                  }
+                                }
+                              ],
+                              "includeExecutionData": false,
+                              "level": "ERROR"
+                            },
+                            "roleArn": {
+                              "Fn::GetAtt": [
+                                "ProviderwaiterstatemachineRole0C7159F9",
+                                "Arn"
+                              ]
+                            }
+                          }
+                        },
                         "constructInfo": {
-                          "fqn": "aws-cdk-lib.CfnResource",
+                          "fqn": "aws-cdk-lib.aws_stepfunctions.CfnStateMachine",
                           "version": "0.0.0"
                         }
                       }
                     },
                     "constructInfo": {
-                      "fqn": "constructs.Construct",
-                      "version": "10.2.26"
+                      "fqn": "aws-cdk-lib.custom_resources.WaiterStateMachine",
+                      "version": "0.0.0"
                     }
                   }
                 },
@@ -2516,7 +2832,7 @@
                           {
                             "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
                           },
-                          "/ff516dab15f2199b2da62103229c0d8486ce9395d8ef6023815b1babed546130.json"
+                          "/fd1b5faf836db4967aa7361c23c7af5794d5f4e664c10ffb1c089ec90ef6e539.json"
                         ]
                       ]
                     }
@@ -2530,7 +2846,7 @@
             },
             "constructInfo": {
               "fqn": "constructs.Construct",
-              "version": "10.2.26"
+              "version": "10.4.2"
             }
           },
           "@aws-cdk--aws-eks.KubectlProvider": {
@@ -2558,7 +2874,8 @@
                         "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.KubectlProvider/Handler/Code/AssetBucket",
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.aws_s3.BucketBase",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       }
                     },
@@ -2577,23 +2894,28 @@
                           "s3Bucket": {
                             "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
                           },
-                          "s3Key": "9017774b84ae2457b1b2ad6fcbb4860d8ce2537062c77010b24d9b156ced5a1b.zip"
-                        },
-                        "role": {
-                          "Ref": "referencetoawsstepfunctionstasksemrcontainersallservicestestintegrationtesteksclusterKubectlHandlerRole4EA39100Arn"
+                          "s3Key": "024d0b8c5d7cf69ece484efe22f1647e273f484175ef3b79df543b7538da9c81.zip"
                         },
                         "description": "onEvent handler for EKS kubectl resource provider",
+                        "environment": {
+                          "variables": {
+                            "AWS_STS_REGIONAL_ENDPOINTS": "regional"
+                          }
+                        },
                         "handler": "index.handler",
                         "layers": [
                           {
                             "Ref": "AwsCliLayerF44AAF94"
                           },
                           {
-                            "Ref": "KubectlLayer600207B5"
+                            "Ref": "referencetoawsstepfunctionstasksemrcontainersallservicestestKubectlLayerC003171BRef"
                           }
                         ],
                         "memorySize": 1024,
-                        "runtime": "python3.7",
+                        "role": {
+                          "Ref": "referencetoawsstepfunctionstasksemrcontainersallservicestestintegrationtesteksclusterKubectlHandlerRole4EA39100Arn"
+                        },
+                        "runtime": "python3.11",
                         "timeout": 900,
                         "vpcConfig": {
                           "subnetIds": [
@@ -2620,7 +2942,8 @@
                 },
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.aws_lambda.Function",
-                  "version": "0.0.0"
+                  "version": "0.0.0",
+                  "metadata": []
                 }
               },
               "AwsCliLayer": {
@@ -2644,7 +2967,8 @@
                         "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.KubectlProvider/AwsCliLayer/Code/AssetBucket",
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.aws_s3.BucketBase",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       }
                     },
@@ -2663,7 +2987,7 @@
                           "s3Bucket": {
                             "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
                           },
-                          "s3Key": "10972873dd8a3bc33ae1cb91d834617be249fd84bed5bdbb6ffbb581650aea83.zip"
+                          "s3Key": "e42a736be21cd3134b9bff4e71e3afa99a4cc900ae489e9a7f7025c8d258f9b8.zip"
                         },
                         "description": "/opt/awscli/aws"
                       }
@@ -2676,63 +3000,8 @@
                 },
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.lambda_layer_awscli.AwsCliLayer",
-                  "version": "0.0.0"
-                }
-              },
-              "KubectlLayer": {
-                "id": "KubectlLayer",
-                "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.KubectlProvider/KubectlLayer",
-                "children": {
-                  "Code": {
-                    "id": "Code",
-                    "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.KubectlProvider/KubectlLayer/Code",
-                    "children": {
-                      "Stage": {
-                        "id": "Stage",
-                        "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.KubectlProvider/KubectlLayer/Code/Stage",
-                        "constructInfo": {
-                          "fqn": "aws-cdk-lib.AssetStaging",
-                          "version": "0.0.0"
-                        }
-                      },
-                      "AssetBucket": {
-                        "id": "AssetBucket",
-                        "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.KubectlProvider/KubectlLayer/Code/AssetBucket",
-                        "constructInfo": {
-                          "fqn": "aws-cdk-lib.aws_s3.BucketBase",
-                          "version": "0.0.0"
-                        }
-                      }
-                    },
-                    "constructInfo": {
-                      "fqn": "aws-cdk-lib.aws_s3_assets.Asset",
-                      "version": "0.0.0"
-                    }
-                  },
-                  "Resource": {
-                    "id": "Resource",
-                    "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.KubectlProvider/KubectlLayer/Resource",
-                    "attributes": {
-                      "aws:cdk:cloudformation:type": "AWS::Lambda::LayerVersion",
-                      "aws:cdk:cloudformation:props": {
-                        "content": {
-                          "s3Bucket": {
-                            "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
-                          },
-                          "s3Key": "7e5f48d1e79c915595d938c932b6f0101715a162780d01a55845367e014fbcda.zip"
-                        },
-                        "description": "/opt/kubectl/kubectl and /opt/helm/helm"
-                      }
-                    },
-                    "constructInfo": {
-                      "fqn": "aws-cdk-lib.aws_lambda.CfnLayerVersion",
-                      "version": "0.0.0"
-                    }
-                  }
-                },
-                "constructInfo": {
-                  "fqn": "aws-cdk-lib.lambda_layer_kubectl.KubectlLayer",
-                  "version": "0.0.0"
+                  "version": "0.0.0",
+                  "metadata": []
                 }
               },
               "ConditionalPolicyArn": {
@@ -2740,7 +3009,8 @@
                 "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.KubectlProvider/ConditionalPolicyArn",
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.Resource",
-                  "version": "0.0.0"
+                  "version": "0.0.0",
+                  "metadata": []
                 }
               },
               "conditionalPolicy": {
@@ -2748,7 +3018,8 @@
                 "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.KubectlProvider/conditionalPolicy",
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.Resource",
-                  "version": "0.0.0"
+                  "version": "0.0.0",
+                  "metadata": []
                 }
               },
               "Provider": {
@@ -2768,7 +3039,8 @@
                             "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.KubectlProvider/Provider/framework-onEvent/ServiceRole/ImportServiceRole",
                             "constructInfo": {
                               "fqn": "aws-cdk-lib.Resource",
-                              "version": "0.0.0"
+                              "version": "0.0.0",
+                              "metadata": []
                             }
                           },
                           "Resource": {
@@ -2859,6 +3131,16 @@
                                               ]
                                             }
                                           ]
+                                        },
+                                        {
+                                          "Action": "lambda:GetFunction",
+                                          "Effect": "Allow",
+                                          "Resource": {
+                                            "Fn::GetAtt": [
+                                              "Handler886CB40B",
+                                              "Arn"
+                                            ]
+                                          }
                                         }
                                       ],
                                       "Version": "2012-10-17"
@@ -2879,13 +3161,15 @@
                             },
                             "constructInfo": {
                               "fqn": "aws-cdk-lib.aws_iam.Policy",
-                              "version": "0.0.0"
+                              "version": "0.0.0",
+                              "metadata": []
                             }
                           }
                         },
                         "constructInfo": {
                           "fqn": "aws-cdk-lib.aws_iam.Role",
-                          "version": "0.0.0"
+                          "version": "0.0.0",
+                          "metadata": []
                         }
                       },
                       "Code": {
@@ -2905,7 +3189,8 @@
                             "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.KubectlProvider/Provider/framework-onEvent/Code/AssetBucket",
                             "constructInfo": {
                               "fqn": "aws-cdk-lib.aws_s3.BucketBase",
-                              "version": "0.0.0"
+                              "version": "0.0.0",
+                              "metadata": []
                             }
                           }
                         },
@@ -2924,13 +3209,7 @@
                               "s3Bucket": {
                                 "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
                               },
-                              "s3Key": "45017ac1fb5b50dac36a255c328b0fe125f18a8e6d3689e188eab5e3a1bf8146.zip"
-                            },
-                            "role": {
-                              "Fn::GetAtt": [
-                                "ProviderframeworkonEventServiceRole9FF04296",
-                                "Arn"
-                              ]
+                              "s3Key": "39472b1c2875cf306d4ba429aeccdd34cb49bcf59dbde81f7e6b6cb9deac23a6.zip"
                             },
                             "description": "AWS CDK resource provider framework - onEvent (aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.KubectlProvider/Provider)",
                             "environment": {
@@ -2944,7 +3223,21 @@
                               }
                             },
                             "handler": "framework.onEvent",
-                            "runtime": "nodejs14.x",
+                            "role": {
+                              "Fn::GetAtt": [
+                                "ProviderframeworkonEventServiceRole9FF04296",
+                                "Arn"
+                              ]
+                            },
+                            "runtime": {
+                              "Fn::FindInMap": [
+                                "LatestNodeRuntimeMap",
+                                {
+                                  "Ref": "AWS::Region"
+                                },
+                                "value"
+                              ]
+                            },
                             "timeout": 900,
                             "vpcConfig": {
                               "subnetIds": [
@@ -2971,7 +3264,8 @@
                     },
                     "constructInfo": {
                       "fqn": "aws-cdk-lib.aws_lambda.Function",
-                      "version": "0.0.0"
+                      "version": "0.0.0",
+                      "metadata": []
                     }
                   }
                 },
@@ -2980,11 +3274,27 @@
                   "version": "0.0.0"
                 }
               },
+              "LatestNodeRuntimeMap": {
+                "id": "LatestNodeRuntimeMap",
+                "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.KubectlProvider/LatestNodeRuntimeMap",
+                "constructInfo": {
+                  "fqn": "aws-cdk-lib.CfnMapping",
+                  "version": "0.0.0"
+                }
+              },
               "awsstepfunctionstasksemrcontainersallservicestestawscdkawseksKubectlProviderframeworkonEventC503FA1CArn": {
                 "id": "awsstepfunctionstasksemrcontainersallservicestestawscdkawseksKubectlProviderframeworkonEventC503FA1CArn",
                 "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.KubectlProvider/awsstepfunctionstasksemrcontainersallservicestestawscdkawseksKubectlProviderframeworkonEventC503FA1CArn",
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.CfnOutput",
+                  "version": "0.0.0"
+                }
+              },
+              "reference-to-awsstepfunctionstasksemrcontainersallservicestestKubectlLayerC003171BRef": {
+                "id": "reference-to-awsstepfunctionstasksemrcontainersallservicestestKubectlLayerC003171BRef",
+                "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/@aws-cdk--aws-eks.KubectlProvider/reference-to-awsstepfunctionstasksemrcontainersallservicestestKubectlLayerC003171BRef",
+                "constructInfo": {
+                  "fqn": "aws-cdk-lib.CfnParameter",
                   "version": "0.0.0"
                 }
               },
@@ -3036,27 +3346,10 @@
                 "attributes": {
                   "aws:cdk:cloudformation:type": "AWS::CloudFormation::Stack",
                   "aws:cdk:cloudformation:props": {
-                    "templateUrl": {
-                      "Fn::Join": [
-                        "",
-                        [
-                          "https://s3.",
-                          {
-                            "Ref": "AWS::Region"
-                          },
-                          ".",
-                          {
-                            "Ref": "AWS::URLSuffix"
-                          },
-                          "/",
-                          {
-                            "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
-                          },
-                          "/e12c6b431e03b10fbf7cd3ffc08708a4c8508e5121470923a1b7255cbdd9dcca.json"
-                        ]
-                      ]
-                    },
                     "parameters": {
+                      "referencetoawsstepfunctionstasksemrcontainersallservicestestKubectlLayerC003171BRef": {
+                        "Ref": "KubectlLayer600207B5"
+                      },
                       "referencetoawsstepfunctionstasksemrcontainersallservicestestintegrationtesteksclusterKubectlHandlerRole4EA39100Arn": {
                         "Fn::GetAtt": [
                           "integrationtesteksclusterKubectlHandlerRole9A4C37D2",
@@ -3075,6 +3368,26 @@
                           "ClusterSecurityGroupId"
                         ]
                       }
+                    },
+                    "templateUrl": {
+                      "Fn::Join": [
+                        "",
+                        [
+                          "https://s3.",
+                          {
+                            "Ref": "AWS::Region"
+                          },
+                          ".",
+                          {
+                            "Ref": "AWS::URLSuffix"
+                          },
+                          "/",
+                          {
+                            "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
+                          },
+                          "/0e1b7fa38f44e093195dff07ffca56166fc0459a0a10f9eb0cf3f4c28d624883.json"
+                        ]
+                      ]
                     }
                   }
                 },
@@ -3086,7 +3399,7 @@
             },
             "constructInfo": {
               "fqn": "constructs.Construct",
-              "version": "10.2.26"
+              "version": "10.4.2"
             }
           },
           "JobExecutionRole": {
@@ -3098,7 +3411,8 @@
                 "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/JobExecutionRole/ImportJobExecutionRole",
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.Resource",
-                  "version": "0.0.0"
+                  "version": "0.0.0",
+                  "metadata": []
                 }
               },
               "Resource": {
@@ -3132,7 +3446,8 @@
             },
             "constructInfo": {
               "fqn": "aws-cdk-lib.aws_iam.Role",
-              "version": "0.0.0"
+              "version": "0.0.0",
+              "metadata": []
             }
           },
           "Create a virtual Cluster": {
@@ -3276,13 +3591,15 @@
                 },
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.aws_iam.Policy",
-                  "version": "0.0.0"
+                  "version": "0.0.0",
+                  "metadata": []
                 }
               }
             },
             "constructInfo": {
               "fqn": "aws-cdk-lib.Resource",
-              "version": "0.0.0"
+              "version": "0.0.0",
+              "metadata": []
             }
           },
           "Start a Job Run": {
@@ -3310,7 +3627,8 @@
                 },
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.aws_logs.LogGroup",
-                  "version": "0.0.0"
+                  "version": "0.0.0",
+                  "metadata": []
                 }
               },
               "Monitoring Bucket": {
@@ -3332,7 +3650,8 @@
                 },
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.aws_s3.Bucket",
-                  "version": "0.0.0"
+                  "version": "0.0.0",
+                  "metadata": []
                 }
               }
             },
@@ -3362,7 +3681,8 @@
                     "path": "aws-stepfunctions-tasks-emr-containers-all-services-test/StateMachine/Role/ImportRole",
                     "constructInfo": {
                       "fqn": "aws-cdk-lib.Resource",
-                      "version": "0.0.0"
+                      "version": "0.0.0",
+                      "metadata": []
                     }
                   },
                   "Resource": {
@@ -3513,13 +3833,15 @@
                     },
                     "constructInfo": {
                       "fqn": "aws-cdk-lib.aws_iam.Policy",
-                      "version": "0.0.0"
+                      "version": "0.0.0",
+                      "metadata": []
                     }
                   }
                 },
                 "constructInfo": {
                   "fqn": "aws-cdk-lib.aws_iam.Role",
-                  "version": "0.0.0"
+                  "version": "0.0.0",
+                  "metadata": []
                 }
               },
               "Resource": {
@@ -3528,12 +3850,6 @@
                 "attributes": {
                   "aws:cdk:cloudformation:type": "AWS::StepFunctions::StateMachine",
                   "aws:cdk:cloudformation:props": {
-                    "roleArn": {
-                      "Fn::GetAtt": [
-                        "StateMachineRoleB840431D",
-                        "Arn"
-                      ]
-                    },
                     "definitionString": {
                       "Fn::Join": [
                         "",
@@ -3572,6 +3888,12 @@
                           ":states:::emr-containers:deleteVirtualCluster\",\"Parameters\":{\"Id.$\":\"$.job.VirtualClusterId\"}}},\"TimeoutSeconds\":1200}"
                         ]
                       ]
+                    },
+                    "roleArn": {
+                      "Fn::GetAtt": [
+                        "StateMachineRoleB840431D",
+                        "Arn"
+                      ]
                     }
                   }
                 },
@@ -3583,7 +3905,8 @@
             },
             "constructInfo": {
               "fqn": "aws-cdk-lib.aws_stepfunctions.StateMachine",
-              "version": "0.0.0"
+              "version": "0.0.0",
+              "metadata": []
             }
           },
           "stateMachineArn": {
@@ -3629,7 +3952,7 @@
                 "path": "aws-stepfunctions-tasks-emr-containers-all-services/DefaultTest/Default",
                 "constructInfo": {
                   "fqn": "constructs.Construct",
-                  "version": "10.2.26"
+                  "version": "10.4.2"
                 }
               },
               "DeployAssert": {
@@ -3675,7 +3998,7 @@
         "path": "Tree",
         "constructInfo": {
           "fqn": "constructs.Construct",
-          "version": "10.2.26"
+          "version": "10.4.2"
         }
       }
     },

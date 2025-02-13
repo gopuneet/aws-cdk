@@ -11,7 +11,7 @@ describe('lambda authorizer', () => {
     const func = new lambda.Function(stack, 'myfunction', {
       handler: 'handler',
       code: lambda.Code.fromInline('foo'),
-      runtime: lambda.Runtime.NODEJS_14_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
     });
 
     const auth = new TokenAuthorizer(stack, 'myauthorizer', {
@@ -28,6 +28,7 @@ describe('lambda authorizer', () => {
       Type: 'TOKEN',
       RestApiId: stack.resolve(restApi.restApiId),
       IdentitySource: 'method.request.header.Authorization',
+      AuthorizerResultTtlInSeconds: 300,
       AuthorizerUri: {
         'Fn::Join': [
           '',
@@ -84,7 +85,7 @@ describe('lambda authorizer', () => {
     const func = new lambda.Function(stack, 'myfunction', {
       handler: 'handler',
       code: lambda.Code.fromInline('foo'),
-      runtime: lambda.Runtime.NODEJS_14_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
     });
 
     const auth = new RequestAuthorizer(stack, 'myauthorizer', {
@@ -102,6 +103,7 @@ describe('lambda authorizer', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Authorizer', {
       Type: 'REQUEST',
       RestApiId: stack.resolve(restApi.restApiId),
+      AuthorizerResultTtlInSeconds: 0,
       AuthorizerUri: {
         'Fn::Join': [
           '',
@@ -150,7 +152,33 @@ describe('lambda authorizer', () => {
     });
 
     expect(auth.authorizerArn.endsWith(`/authorizers/${auth.authorizerId}`)).toBeTruthy();
+  });
 
+  test('request authorizer with default cache TTL', () => {
+    const stack = new Stack();
+
+    const func = new lambda.Function(stack, 'myfunction', {
+      handler: 'handler',
+      code: lambda.Code.fromInline('foo'),
+      runtime: lambda.Runtime.NODEJS_LATEST,
+    });
+
+    const auth = new RequestAuthorizer(stack, 'myauthorizer', {
+      handler: func,
+      identitySources: [IdentitySource.header('whoami')],
+    });
+
+    const restApi = new RestApi(stack, 'myrestapi');
+    restApi.root.addMethod('ANY', undefined, {
+      authorizer: auth,
+      authorizationType: AuthorizationType.CUSTOM,
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Authorizer', {
+      Type: 'REQUEST',
+      RestApiId: stack.resolve(restApi.restApiId),
+      AuthorizerResultTtlInSeconds: 300,
+    });
   });
 
   test('invalid request authorizer config', () => {
@@ -159,7 +187,7 @@ describe('lambda authorizer', () => {
     const func = new lambda.Function(stack, 'myfunction', {
       handler: 'handler',
       code: lambda.Code.fromInline('foo'),
-      runtime: lambda.Runtime.NODEJS_14_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
     });
 
     expect(() => new RequestAuthorizer(stack, 'myauthorizer', {
@@ -175,7 +203,7 @@ describe('lambda authorizer', () => {
     const func = new lambda.Function(stack, 'myfunction', {
       handler: 'handler',
       code: lambda.Code.fromInline('foo'),
-      runtime: lambda.Runtime.NODEJS_14_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
     });
 
     const auth = new TokenAuthorizer(stack, 'myauthorizer', {
@@ -248,7 +276,7 @@ describe('lambda authorizer', () => {
     const func = new lambda.Function(stack, 'myfunction', {
       handler: 'handler',
       code: lambda.Code.fromInline('foo'),
-      runtime: lambda.Runtime.NODEJS_14_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
     });
 
     const auth = new RequestAuthorizer(stack, 'myauthorizer', {
@@ -319,7 +347,7 @@ describe('lambda authorizer', () => {
     const func = new lambda.Function(stack, 'myfunction', {
       handler: 'handler',
       code: lambda.Code.fromInline('foo'),
-      runtime: lambda.Runtime.NODEJS_14_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
     });
 
     const role = new iam.Role(stack, 'authorizerassumerole', {
@@ -409,7 +437,7 @@ describe('lambda authorizer', () => {
     const func = new lambda.Function(stack, 'myfunction', {
       handler: 'handler',
       code: lambda.Code.fromInline('foo'),
-      runtime: lambda.Runtime.NODEJS_14_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
     });
 
     const role = new iam.Role(stack, 'authorizerassumerole', {
@@ -500,7 +528,7 @@ describe('lambda authorizer', () => {
     const func = new lambda.Function(stack, 'myfunction', {
       handler: 'handler',
       code: lambda.Code.fromInline('foo'),
-      runtime: lambda.Runtime.NODEJS_14_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
     });
     const auth = new TokenAuthorizer(stack, 'myauthorizer', {
       handler: func,
@@ -514,7 +542,7 @@ describe('lambda authorizer', () => {
     const func = new lambda.Function(stack, 'myfunction', {
       handler: 'handler',
       code: lambda.Code.fromInline('foo'),
-      runtime: lambda.Runtime.NODEJS_14_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
     });
     const auth = new RequestAuthorizer(stack, 'myauthorizer', {
       handler: func,
@@ -559,7 +587,7 @@ describe('lambda authorizer', () => {
     const func = new lambda.Function(stack, 'myfunction', {
       handler: 'handler',
       code: lambda.Code.fromInline('foo'),
-      runtime: lambda.Runtime.NODEJS_14_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
     });
 
     const auth = new RequestAuthorizer(stack, 'myauthorizer', {

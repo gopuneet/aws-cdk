@@ -2,8 +2,8 @@ import { sortKeyComparator } from './sorting';
 import { Match } from '../match';
 import { Matcher, MatchResult } from '../matcher';
 
-export type MatchSuccess = { match: true, matches: { [key: string]: any }, analyzed: { [key: string]: any }, analyzedCount: number };
-export type MatchFailure = { match: false, closestResults: Record<string, MatchResult>, analyzed: { [key: string]: any }, analyzedCount: number };
+export type MatchSuccess = { match: true; matches: { [key: string]: any }; analyzed: { [key: string]: any }; analyzedCount: number };
+export type MatchFailure = { match: false; closestResults: Record<string, MatchResult>; analyzed: { [key: string]: any }; analyzedCount: number };
 
 export function matchSection(section: any, props: any): MatchSuccess | MatchFailure {
   const matcher = Matcher.isMatcher(props) ? props : Match.objectLike(props);
@@ -38,7 +38,6 @@ export function matchSection(section: any, props: any): MatchSuccess | MatchFail
 function eachEntryInSection(
   section: any,
   cb: (logicalId: string, entry: { [key: string]: any }) => void): void {
-
   for (const logicalId of Object.keys(section ?? {})) {
     const resource: { [key: string]: any } = section[logicalId];
     cb(logicalId, resource);

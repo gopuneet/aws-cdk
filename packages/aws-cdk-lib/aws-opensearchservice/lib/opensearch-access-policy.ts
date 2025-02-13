@@ -27,12 +27,12 @@ export interface OpenSearchAccessPolicyProps {
  * Creates LogGroup resource policies.
  */
 export class OpenSearchAccessPolicy extends cr.AwsCustomResource {
-
   private accessPolicyStatements: iam.PolicyStatement[] = [];
 
   constructor(scope: Construct, id: string, props: OpenSearchAccessPolicyProps) {
     super(scope, id, {
       resourceType: 'Custom::OpenSearchAccessPolicy',
+      installLatestAwsSdk: false,
       onUpdate: {
         action: 'updateDomainConfig',
         service: 'OpenSearch',

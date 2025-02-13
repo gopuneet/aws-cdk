@@ -3,7 +3,7 @@ import * as iam from '../../../aws-iam';
 import * as sns from '../../../aws-sns';
 import * as sfn from '../../../aws-stepfunctions';
 import { Token } from '../../../core';
-import { integrationResourceArn, validatePatternSupported } from '../private/task-utils';
+import { integrationResourceArn, isJsonPathOrJsonataExpression, validatePatternSupported } from '../private/task-utils';
 
 /**
  * The data type set for the SNS message attributes
@@ -35,7 +35,7 @@ export enum MessageAttributeDataType {
    *
    * @see https://docs.aws.amazon.com/sns/latest/dg/sns-message-attributes.html#SNSMessageAttributes.DataTypes
    */
-  BINARY = 'Binary'
+  BINARY = 'Binary',
 }
 
 /**
@@ -55,14 +55,10 @@ export interface MessageAttribute {
    * @see https://docs.aws.amazon.com/sns/latest/dg/sns-message-attributes.html#SNSMessageAttributes.DataTypes
    * @default determined by type inspection if possible, fallback is String
    */
-  readonly dataType?: MessageAttributeDataType
+  readonly dataType?: MessageAttributeDataType;
 }
 
-/**
- * Properties for publishing a message to an SNS topic
- */
-export interface SnsPublishProps extends sfn.TaskStateBaseProps {
-
+interface SnsPublishOptions {
   /**
    * The SNS topic that the task will publish to.
    */
@@ -112,13 +108,69 @@ export interface SnsPublishProps extends sfn.TaskStateBaseProps {
    * @default - No subject
    */
   readonly subject?: string;
+
+  /**
+   * This parameter applies only to FIFO topics.
+   *
+   * The MessageGroupId is a tag that specifies that a message belongs to a specific message group.
+   * Messages that belong to the same message group are processed in a FIFO manner
+   * (however, messages in different message groups might be processed out of order).
+   * Every message must include a MessageGroupId.
+   *
+   * @default - Not used for standard topics, required for FIFO topics.
+   */
+  readonly messageGroupId?: string;
+
+  /**
+   * This parameter applies only to FIFO topics.
+   *
+   * Every message must have a unique MessageDeduplicationId, which is a token used for deduplication of sent messages.
+   * If a message with a particular MessageDeduplicationId is sent successfully, any message sent with the same MessageDeduplicationId
+   * during the 5-minute deduplication interval is treated as a duplicate.
+   *
+   * If the topic has ContentBasedDeduplication set, the system generates a MessageDeduplicationId
+   * based on the contents of the message. Your MessageDeduplicationId overrides the generated one.
+   *
+   * @default - Not used for standard topics, required for FIFO topics with ContentBasedDeduplication disabled.
+   */
+  readonly messageDeduplicationId?: string;
 }
 
 /**
+ * Properties for publishing a message to an SNS topic using JSONPath
+ */
+export interface SnsPublishJsonPathProps extends sfn.TaskStateJsonPathBaseProps, SnsPublishOptions { }
+
+/**
+ * Properties for publishing a message to an SNS topic using JSONata
+ */
+export interface SnsPublishJsonataProps extends sfn.TaskStateJsonataBaseProps, SnsPublishOptions { }
+
+/**
+ * Properties for publishing a message to an SNS topic
+ */
+export interface SnsPublishProps extends sfn.TaskStateBaseProps, SnsPublishOptions { }
+
+/**
  * A Step Functions Task to publish messages to SNS topic.
- *
  */
 export class SnsPublish extends sfn.TaskStateBase {
+  /**
+   * A Step Functions Task to publish messages to SNS topic using JSONPath.
+   */
+  public static jsonPath(scope: Construct, id: string, props: SnsPublishJsonPathProps) {
+    return new SnsPublish(scope, id, props);
+  }
+
+  /**
+   * A Step Functions Task to publish messages to SNS topic using JSONata.
+   */
+  public static jsonata(scope: Construct, id: string, props: SnsPublishJsonataProps) {
+    return new SnsPublish(scope, id, {
+      ...props,
+      queryLanguage: sfn.QueryLanguage.JSONATA,
+    });
+  }
 
   private static readonly SUPPORTED_INTEGRATION_PATTERNS: sfn.IntegrationPattern[] = [
     sfn.IntegrationPattern.REQUEST_RESPONSE,
@@ -142,6 +194,21 @@ export class SnsPublish extends sfn.TaskStateBase {
       }
     }
 
+    if (props.topic.fifo) {
+      if (!props.messageGroupId) {
+        throw new Error('\'messageGroupId\' is required for FIFO topics');
+      }
+      if (props.messageGroupId.length > 128) {
+        throw new Error(`\'messageGroupId\' must be at most 128 characters long, got ${props.messageGroupId.length}`);
+      }
+      if (!props.topic.contentBasedDeduplication && !props.messageDeduplicationId) {
+        throw new Error('\'messageDeduplicationId\' is required for FIFO topics with \'contentBasedDeduplication\' disabled');
+      }
+      if (props.messageDeduplicationId && props.messageDeduplicationId.length > 128) {
+        throw new Error(`\'messageDeduplicationId\' must be at most 128 characters long, got ${props.messageDeduplicationId.length}`);
+      }
+    }
+
     this.taskPolicies = [
       new iam.PolicyStatement({
         actions: ['sns:Publish'],
@@ -151,21 +218,21 @@ export class SnsPublish extends sfn.TaskStateBase {
   }
 
   /**
-   * Provides the SNS Publish service integration task configuration
-   */
-  /**
    * @internal
    */
-  protected _renderTask(): any {
+  protected _renderTask(topLevelQueryLanguage?: sfn.QueryLanguage): any {
+    const queryLanguage = sfn._getActualQueryLanguage(topLevelQueryLanguage, this.props.queryLanguage);
     return {
       Resource: integrationResourceArn('sns', 'publish', this.integrationPattern),
-      Parameters: sfn.FieldUtils.renderObject({
+      ...this._renderParametersOrArguments({
         TopicArn: this.props.topic.topicArn,
         Message: this.props.message.value,
+        MessageDeduplicationId: this.props.messageDeduplicationId,
+        MessageGroupId: this.props.messageGroupId,
         MessageStructure: this.props.messagePerSubscriptionType ? 'json' : undefined,
         MessageAttributes: renderMessageAttributes(this.props.messageAttributes),
         Subject: this.props.subject,
-      }),
+      }, queryLanguage),
     };
   }
 }
@@ -237,7 +304,7 @@ function validateMessageAttribute(attribute: MessageAttribute): void {
   switch (typeof value) {
     case 'string':
       // trust the user or will default to string
-      if (sfn.JsonPath.isEncodedJsonPath(attribute.value)) {
+      if (isJsonPathOrJsonataExpression(attribute.value)) {
         return;
       }
       if (dataType === MessageAttributeDataType.STRING ||

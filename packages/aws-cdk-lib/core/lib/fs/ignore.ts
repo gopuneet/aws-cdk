@@ -1,8 +1,11 @@
 import * as path from 'path';
 import dockerIgnore, * as DockerIgnore from '@balena/dockerignore';
 import gitIgnore, * as GitIgnore from 'ignore';
-import * as minimatch from 'minimatch';
 import { CopyOptions, IgnoreMode } from './options';
+
+// Must be a 'require' to not run afoul of ESM module import rules
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const minimatch = require('minimatch');
 
 /**
  * Represents file path ignoring behavior.
@@ -13,7 +16,6 @@ export abstract class IgnoreStrategy {
    *
    * @returns `GlobIgnorePattern` associated with the given patterns.
    * @param absoluteRootPath the absolute path to the root directory of the paths to be considered
-   * @param patterns
    */
   public static glob(absoluteRootPath: string, patterns: string[]): GlobIgnoreStrategy {
     return new GlobIgnoreStrategy(absoluteRootPath, patterns);
@@ -24,7 +26,6 @@ export abstract class IgnoreStrategy {
    *
    * @returns `GitIgnorePattern` associated with the given patterns.
    * @param absoluteRootPath the absolute path to the root directory of the paths to be considered
-   * @param patterns
    */
   public static git(absoluteRootPath: string, patterns: string[]): GitIgnoreStrategy {
     return new GitIgnoreStrategy(absoluteRootPath, patterns);
@@ -35,7 +36,6 @@ export abstract class IgnoreStrategy {
    *
    * @returns `DockerIgnorePattern` associated with the given patterns.
    * @param absoluteRootPath the absolute path to the root directory of the paths to be considered
-   * @param patterns
    */
   public static docker(absoluteRootPath: string, patterns: string[]): DockerIgnoreStrategy {
     return new DockerIgnoreStrategy(absoluteRootPath, patterns);

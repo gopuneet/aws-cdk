@@ -1,6 +1,7 @@
 import { Construct } from 'constructs';
 import { ILambdaDeploymentConfig } from './deployment-config';
 import { Duration, Names, Resource } from '../../../core';
+import { addConstructMetadata } from '../../../core/lib/metadata-resource';
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from '../../../custom-resources';
 import { arnForDeploymentConfig, validateName } from '../private/utils';
 
@@ -19,7 +20,7 @@ export enum CustomLambdaDeploymentConfigType {
    * Linear deployment type
    * @deprecated Use `LambdaDeploymentConfig`
    */
-  LINEAR = 'Linear'
+  LINEAR = 'Linear',
 }
 
 /**
@@ -65,7 +66,6 @@ export interface CustomLambdaDeploymentConfigProps {
  * @deprecated CloudFormation now supports Lambda deployment configurations without custom resources. Use `LambdaDeploymentConfig`.
  */
 export class CustomLambdaDeploymentConfig extends Resource implements ILambdaDeploymentConfig {
-
   /**
    * The name of the deployment config
    * @attribute
@@ -82,12 +82,14 @@ export class CustomLambdaDeploymentConfig extends Resource implements ILambdaDep
 
   public constructor(scope: Construct, id: string, props: CustomLambdaDeploymentConfigProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
     this.validateParameters(props);
 
     // In this section we make the argument for the AWS API call
     const deploymentType = 'TimeBased' + props.type.toString();
-    const intervalMinutes = props.interval.toMinutes().toString();
-    const percentage = props.percentage.toString();
+    const intervalMinutes = props.interval.toMinutes();
+    const percentage = props.percentage;
     let routingConfig; // The argument to the AWS API call
     if (props.type == CustomLambdaDeploymentConfigType.CANARY) {
       routingConfig = {

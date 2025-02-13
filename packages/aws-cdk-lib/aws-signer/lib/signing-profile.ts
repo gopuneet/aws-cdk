@@ -1,6 +1,7 @@
 import { Construct } from 'constructs';
 import { CfnSigningProfile } from './signer.generated';
 import { Duration, IResource, Resource, Stack } from '../../core';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
 
 /**
  * Platforms that are allowed with signing config.
@@ -10,32 +11,47 @@ export class Platform {
   /**
    * Specification of signature format and signing algorithms for AWS IoT Device.
    */
-  public static readonly AWS_IOT_DEVICE_MANAGEMENT_SHA256_ECDSA = new Platform('AWSIoTDeviceManagement-SHA256-ECDSA');
+  public static readonly AWS_IOT_DEVICE_MANAGEMENT_SHA256_ECDSA = Platform.of('AWSIoTDeviceManagement-SHA256-ECDSA');
 
   /**
    * Specification of signature format and signing algorithms for AWS Lambda.
    */
-  public static readonly AWS_LAMBDA_SHA384_ECDSA = new Platform('AWSLambda-SHA384-ECDSA');
+  public static readonly AWS_LAMBDA_SHA384_ECDSA = Platform.of('AWSLambda-SHA384-ECDSA');
 
   /**
    * Specification of signature format and signing algorithms with
    * SHA1 hash and RSA encryption for Amazon FreeRTOS.
    */
-  public static readonly AMAZON_FREE_RTOS_TI_CC3220SF = new Platform('AmazonFreeRTOS-TI-CC3220SF');
+  public static readonly AMAZON_FREE_RTOS_TI_CC3220SF = Platform.of('AmazonFreeRTOS-TI-CC3220SF');
 
   /**
    * Specification of signature format and signing algorithms with
    * SHA256 hash and ECDSA encryption for Amazon FreeRTOS.
    */
-  public static readonly AMAZON_FREE_RTOS_DEFAULT = new Platform('AmazonFreeRTOS-Default');
+  public static readonly AMAZON_FREE_RTOS_DEFAULT = Platform.of('AmazonFreeRTOS-Default');
 
   /**
-   * The id of signing platform.
-   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-signer-signingprofile.html#cfn-signer-signingprofile-platformid
+   * Specification of signature format and signing algorithms with
+   * SHA256 hash and ECDSA encryption for container registries with notation.
    */
-  public readonly platformId: string;
+  public static readonly NOTATION_OCI_SHA384_ECDSA = Platform.of('Notation-OCI-SHA384-ECDSA');
 
-  private constructor(platformId: string) {
+  /**
+   * Custom signing profile platform.
+   *
+   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-signer-signingprofile.html#cfn-signer-signingprofile-platformid
+   *
+   * @param platformId - The id of signing platform.
+   */
+  public static of(platformId: string): Platform {
+    return new Platform(platformId);
+  }
+
+  /**
+   *
+   * @param platformId - The id of signing platform.
+   */
+  private constructor(public readonly platformId: string) {
     this.platformId = platformId;
   }
 }
@@ -158,6 +174,8 @@ export class SigningProfile extends Resource implements ISigningProfile {
     super(scope, id, {
       physicalName: props.signingProfileName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const resource = new CfnSigningProfile( this, 'Resource', {
       platformId: props.platform.platformId,

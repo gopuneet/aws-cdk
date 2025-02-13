@@ -20,7 +20,6 @@ export class AcceleratorSecurityGroupPeer implements ec2.IPeer {
    * to other resources created by CDK.
    */
   public static fromVpc(scope: Construct, id: string, vpc: ec2.IVpc, endpointGroup: EndpointGroup) {
-
     // The security group name is always 'GlobalAccelerator'
     const globalAcceleratorSGName = 'GlobalAccelerator';
 
@@ -29,7 +28,7 @@ export class AcceleratorSecurityGroupPeer implements ec2.IPeer {
 
     // The AWS Custom Resource that make a call to EC2 to get the security group ID, for the given VPC
     const lookupAcceleratorSGCustomResource = new AwsCustomResource(scope, id + 'CustomResource', {
-      onCreate: {
+      onUpdate: {
         service: 'EC2',
         action: 'describeSecurityGroups',
         parameters: {

@@ -1,14 +1,15 @@
-import * as path from 'path';
 import { Construct } from 'constructs';
 import {
   Arn,
   CustomResource,
-  CustomResourceProvider,
-  CustomResourceProviderRuntime,
+  FeatureFlags,
   IResource,
   Resource,
   Token,
 } from '../../core';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
+import { OidcProvider } from '../../custom-resource-handlers/dist/aws-iam/oidc-provider.generated';
+import { IAM_OIDC_REJECT_UNAUTHORIZED_CONNECTIONS } from '../../cx-api';
 
 const RESOURCE_TYPE = 'Custom::AWSCDKOpenIdConnectProvider';
 
@@ -139,6 +140,10 @@ export class OpenIdConnectProvider extends Resource implements IOpenIdConnectPro
    */
   public constructor(scope: Construct, id: string, props: OpenIdConnectProviderProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
+
+    const rejectUnauthorized = FeatureFlags.of(this).isEnabled(IAM_OIDC_REJECT_UNAUTHORIZED_CONNECTIONS) ?? false;
 
     const provider = this.getOrCreateProvider();
     const resource = new CustomResource(this, 'Resource', {
@@ -148,6 +153,7 @@ export class OpenIdConnectProvider extends Resource implements IOpenIdConnectPro
         ClientIDList: props.clientIds,
         ThumbprintList: props.thumbprints,
         Url: props.url,
+        RejectUnauthorized: rejectUnauthorized,
 
         // code changes can cause thumbprint changes in case they weren't explicitly provided.
         // add the code hash as a property so that CFN invokes the UPDATE handler in these cases,
@@ -162,9 +168,7 @@ export class OpenIdConnectProvider extends Resource implements IOpenIdConnectPro
   }
 
   private getOrCreateProvider() {
-    return CustomResourceProvider.getOrCreateProvider(this, RESOURCE_TYPE, {
-      codeDirectory: path.join(__dirname, 'oidc-provider'),
-      runtime: CustomResourceProviderRuntime.NODEJS_16_X,
+    return OidcProvider.getOrCreateProvider(this, RESOURCE_TYPE, {
       policyStatements: [
         {
           Effect: 'Allow',

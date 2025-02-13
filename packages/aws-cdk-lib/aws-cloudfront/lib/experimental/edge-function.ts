@@ -1,4 +1,3 @@
-import * as path from 'path';
 import { Construct, Node } from 'constructs';
 import * as cloudwatch from '../../../aws-cloudwatch';
 import * as ec2 from '../../../aws-ec2';
@@ -6,16 +5,16 @@ import * as iam from '../../../aws-iam';
 import * as lambda from '../../../aws-lambda';
 import * as ssm from '../../../aws-ssm';
 import {
-  builtInCustomResourceProviderNodeRuntime,
   CfnResource,
   CustomResource,
-  CustomResourceProvider,
   Lazy,
   Resource,
   Stack,
   Stage,
   Token,
 } from '../../../core';
+import { addConstructMetadata, MethodMetadata } from '../../../core/lib/metadata-resource';
+import { CrossRegionStringParamReaderProvider } from '../../../custom-resource-handlers/dist/aws-cloudfront/cross-region-string-param-reader-provider.generated';
 
 /**
  * Properties for creating a Lambda@Edge function
@@ -41,7 +40,6 @@ export interface EdgeFunctionProps extends lambda.FunctionProps {
  * @resource AWS::Lambda::Function
  */
 export class EdgeFunction extends Resource implements lambda.IVersion {
-
   private static readonly EDGE_REGION: string = 'us-east-1';
 
   public readonly edgeArn: string;
@@ -59,6 +57,8 @@ export class EdgeFunction extends Resource implements lambda.IVersion {
 
   constructor(scope: Construct, id: string, props: EdgeFunctionProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     // Create a simple Function if we're already in us-east-1; otherwise create a cross-region stack.
     const regionIsUsEast1 = !Token.isUnresolved(this.env.region) && this.env.region === 'us-east-1';
@@ -91,6 +91,7 @@ export class EdgeFunction extends Resource implements lambda.IVersion {
     return this;
   }
 
+  @MethodMetadata()
   public addAlias(aliasName: string, options: lambda.AliasOptions = {}): lambda.Alias {
     return new lambda.Alias(this._edgeFunction, `Alias${aliasName}`, {
       aliasName,
@@ -109,43 +110,68 @@ export class EdgeFunction extends Resource implements lambda.IVersion {
     throw new Error('$LATEST function version cannot be used for Lambda@Edge');
   }
 
+  @MethodMetadata()
   public addEventSourceMapping(id: string, options: lambda.EventSourceMappingOptions): lambda.EventSourceMapping {
     return this.lambda.addEventSourceMapping(id, options);
   }
+  @MethodMetadata()
   public addPermission(id: string, permission: lambda.Permission): void {
     return this.lambda.addPermission(id, permission);
   }
+  @MethodMetadata()
   public addToRolePolicy(statement: iam.PolicyStatement): void {
     return this.lambda.addToRolePolicy(statement);
   }
+  @MethodMetadata()
   public grantInvoke(identity: iam.IGrantable): iam.Grant {
     return this.lambda.grantInvoke(identity);
   }
+  @MethodMetadata()
+  public grantInvokeLatestVersion(identity: iam.IGrantable): iam.Grant {
+    return this.lambda.grantInvokeLatestVersion(identity);
+  }
+  @MethodMetadata()
+  public grantInvokeVersion(identity: iam.IGrantable, version: lambda.IVersion): iam.Grant {
+    return this.lambda.grantInvokeVersion(identity, version);
+  }
+  @MethodMetadata()
   public grantInvokeUrl(identity: iam.IGrantable): iam.Grant {
     return this.lambda.grantInvokeUrl(identity);
   }
+  @MethodMetadata()
+  public grantInvokeCompositePrincipal(compositePrincipal: iam.CompositePrincipal): iam.Grant[] {
+    return this.lambda.grantInvokeCompositePrincipal(compositePrincipal);
+  }
+  @MethodMetadata()
   public metric(metricName: string, props?: cloudwatch.MetricOptions): cloudwatch.Metric {
     return this.lambda.metric(metricName, { ...props, region: EdgeFunction.EDGE_REGION });
   }
+  @MethodMetadata()
   public metricDuration(props?: cloudwatch.MetricOptions): cloudwatch.Metric {
     return this.lambda.metricDuration({ ...props, region: EdgeFunction.EDGE_REGION });
   }
+  @MethodMetadata()
   public metricErrors(props?: cloudwatch.MetricOptions): cloudwatch.Metric {
     return this.lambda.metricErrors({ ...props, region: EdgeFunction.EDGE_REGION });
   }
+  @MethodMetadata()
   public metricInvocations(props?: cloudwatch.MetricOptions): cloudwatch.Metric {
     return this.lambda.metricInvocations({ ...props, region: EdgeFunction.EDGE_REGION });
   }
+  @MethodMetadata()
   public metricThrottles(props?: cloudwatch.MetricOptions): cloudwatch.Metric {
     return this.lambda.metricThrottles({ ...props, region: EdgeFunction.EDGE_REGION });
   }
   /** Adds an event source to this function. */
+  @MethodMetadata()
   public addEventSource(source: lambda.IEventSource): void {
     return this.lambda.addEventSource(source);
   }
+  @MethodMetadata()
   public configureAsyncInvoke(options: lambda.EventInvokeConfigOptions): void {
     return this.lambda.configureAsyncInvoke(options);
   }
+  @MethodMetadata()
   public addFunctionUrl(options?: lambda.FunctionUrlOptions): lambda.FunctionUrl {
     return this.lambda.addFunctionUrl(options);
   }
@@ -196,9 +222,7 @@ export class EdgeFunction extends Resource implements lambda.IVersion {
     });
 
     const resourceType = 'Custom::CrossRegionStringParameterReader';
-    const serviceToken = CustomResourceProvider.getOrCreate(this, resourceType, {
-      codeDirectory: path.join(__dirname, 'edge-function'),
-      runtime: builtInCustomResourceProviderNodeRuntime(this),
+    const serviceToken = CrossRegionStringParamReaderProvider.getOrCreate(this, resourceType, {
       policyStatements: [{
         Effect: 'Allow',
         Resource: parameterArnPrefix,

@@ -13,11 +13,13 @@ import * as iam from '../../aws-iam';
 import * as kms from '../../aws-kms';
 import * as secretsmanager from '../../aws-secretsmanager';
 import { Resource, Duration, Token, Annotations, RemovalPolicy, IResource, Stack, Lazy, FeatureFlags, ArnFormat } from '../../core';
+import { ValidationError } from '../../core/lib/errors';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
 import * as cxapi from '../../cx-api';
 
 /**
-  * Interface representing a serverless database cluster.
-  *
+ * Interface representing a serverless database cluster.
+ *
  */
 export interface IServerlessCluster extends IResource, ec2.IConnectable, secretsmanager.ISecretAttachmentTarget {
   /**
@@ -47,10 +49,10 @@ export interface IServerlessCluster extends IResource, ec2.IConnectable, secrets
    *
    * @param grantee The principal to grant access to
    */
-  grantDataApiAccess(grantee: iam.IGrantable): iam.Grant
+  grantDataApiAccess(grantee: iam.IGrantable): iam.Grant;
 }
 /**
- *  Common Properties to configure new Aurora Serverless Cluster or Aurora Serverless Cluster from snapshot
+ *  Common Properties to configure new Aurora Serverless v1 Cluster or Aurora Serverless v1 Cluster from snapshot
  */
 interface ServerlessClusterNewProps {
   /**
@@ -92,13 +94,13 @@ interface ServerlessClusterNewProps {
    * Whether to enable the Data API.
    *
    * @see https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api.html
-    *
+   *
    * @default false
    */
   readonly enableDataApi?: boolean;
 
   /**
-   * The VPC that this Aurora Serverless cluster has been created in.
+   * The VPC that this Aurora Serverless v1 Cluster has been created in.
    *
    * @default - the default VPC in the account and region will be used
    */
@@ -236,11 +238,31 @@ export enum AuroraCapacityUnit {
   /** 256 Aurora Capacity Units */
   ACU_256 = 256,
   /** 384 Aurora Capacity Units */
-  ACU_384 = 384
+  ACU_384 = 384,
 }
 
 /**
- * Options for configuring scaling on an Aurora Serverless cluster
+ * TimeoutAction defines the action to take when a timeout occurs if a scaling point is not found.
+ *
+ * @see https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v1.how-it-works.html#aurora-serverless.how-it-works.timeout-action
+ */
+export enum TimeoutAction {
+  /**
+   * FORCE_APPLY_CAPACITY_CHANGE sets the capacity to the specified value as soon as possible.
+   * Transactions may be interrupted, and connections to temporary tables and locks may be dropped.
+   * Only select this option if your application can recover from dropped connections or incomplete transactions.
+   */
+  FORCE_APPLY_CAPACITY_CHANGE = 'ForceApplyCapacityChange',
+
+  /**
+   * ROLLBACK_CAPACITY_CHANGE ignores the capacity change if a scaling point is not found.
+   * This is the default behavior.
+   */
+  ROLLBACK_CAPACITY_CHANGE = 'RollbackCapacityChange',
+}
+
+/**
+ * Options for configuring scaling on an Aurora Serverless v1 Cluster
  *
  */
 export interface ServerlessScalingOptions {
@@ -272,6 +294,23 @@ export interface ServerlessScalingOptions {
    * @default - automatic pause enabled after 5 minutes
    */
   readonly autoPause?: Duration;
+
+  /**
+   * The amount of time that Aurora Serverless v1 tries to find a scaling point to perform
+   * seamless scaling before enforcing the timeout action.
+   *
+   * @default - 5 minutes
+   */
+  readonly timeout? : Duration;
+
+  /**
+   * The action to take when the timeout is reached.
+   * Selecting ForceApplyCapacityChange will force the capacity to the specified value as soon as possible, even without a scaling point.
+   * Selecting RollbackCapacityChange will ignore the capacity change if a scaling point is not found. This is the default behavior.
+   *
+   * @default - TimeoutAction.ROLLBACK_CAPACITY_CHANGE
+   */
+  readonly timeoutAction?: TimeoutAction;
 }
 
 /**
@@ -324,7 +363,7 @@ abstract class ServerlessClusterBase extends Resource implements IServerlessClus
    */
   public grantDataApiAccess(grantee: iam.IGrantable): iam.Grant {
     if (this.enableDataApi === false) {
-      throw new Error('Cannot grant Data API access when the Data API is disabled');
+      throw new ValidationError('Cannot grant Data API access when the Data API is disabled', this);
     }
 
     this.enableDataApi = true;
@@ -350,7 +389,7 @@ abstract class ServerlessClusterBase extends Resource implements IServerlessClus
 }
 
 /**
- * Create an Aurora Serverless Cluster
+ * Create an Aurora Serverless v1 Cluster
  *
  * @resource AWS::RDS::DBCluster
  */
@@ -365,13 +404,13 @@ abstract class ServerlessClusterNew extends ServerlessClusterBase {
 
     if (props.vpc === undefined) {
       if (props.vpcSubnets !== undefined) {
-        throw new Error('A VPC is required to use vpcSubnets in ServerlessCluster. Please add a VPC or remove vpcSubnets');
+        throw new ValidationError('A VPC is required to use vpcSubnets in ServerlessCluster. Please add a VPC or remove vpcSubnets', this);
       }
       if (props.subnetGroup !== undefined) {
-        throw new Error('A VPC is required to use subnetGroup in ServerlessCluster. Please add a VPC or remove subnetGroup');
+        throw new ValidationError('A VPC is required to use subnetGroup in ServerlessCluster. Please add a VPC or remove subnetGroup', this);
       }
       if (props.securityGroups !== undefined) {
-        throw new Error('A VPC is required to use securityGroups in ServerlessCluster. Please add a VPC or remove securityGroups');
+        throw new ValidationError('A VPC is required to use securityGroups in ServerlessCluster. Please add a VPC or remove securityGroups', this);
       }
     }
 
@@ -403,7 +442,7 @@ abstract class ServerlessClusterNew extends ServerlessClusterBase {
     if (props.backupRetention) {
       const backupRetentionDays = props.backupRetention.toDays();
       if (backupRetentionDays < 1 || backupRetentionDays > 35) {
-        throw new Error(`backup retention period must be between 1 and 35 days. received: ${backupRetentionDays}`);
+        throw new ValidationError(`backup retention period must be between 1 and 35 days. received: ${backupRetentionDays}`, this);
       }
     }
 
@@ -444,14 +483,19 @@ abstract class ServerlessClusterNew extends ServerlessClusterBase {
   private renderScalingConfiguration(options: ServerlessScalingOptions): CfnDBCluster.ScalingConfigurationProperty {
     const minCapacity = options.minCapacity;
     const maxCapacity = options.maxCapacity;
+    const timeout = options.timeout?.toSeconds();
 
     if (minCapacity && maxCapacity && minCapacity > maxCapacity) {
-      throw new Error('maximum capacity must be greater than or equal to minimum capacity.');
+      throw new ValidationError('maximum capacity must be greater than or equal to minimum capacity.', this);
     }
 
     const secondsToAutoPause = options.autoPause?.toSeconds();
     if (secondsToAutoPause && (secondsToAutoPause < 300 || secondsToAutoPause > 86400)) {
-      throw new Error('auto pause time must be between 5 minutes and 1 day.');
+      throw new ValidationError('auto pause time must be between 5 minutes and 1 day.', this);
+    }
+
+    if (timeout && (timeout < 60 || timeout > 600)) {
+      throw new ValidationError(`timeout must be between 60 and 600 seconds, but got ${timeout} seconds.`, this);
     }
 
     return {
@@ -459,12 +503,14 @@ abstract class ServerlessClusterNew extends ServerlessClusterBase {
       minCapacity: options.minCapacity,
       maxCapacity: options.maxCapacity,
       secondsUntilAutoPause: (secondsToAutoPause === 0) ? undefined : secondsToAutoPause,
+      secondsBeforeTimeout: timeout,
+      timeoutAction: options.timeoutAction,
     };
   }
 }
 
 /**
- * Properties for a new Aurora Serverless Cluster
+ * Properties for a new Aurora Serverless v1 Cluster
  */
 export interface ServerlessClusterProps extends ServerlessClusterNewProps {
   /**
@@ -483,7 +529,7 @@ export interface ServerlessClusterProps extends ServerlessClusterNewProps {
 }
 
 /**
- * Create an Aurora Serverless Cluster
+ * Create an Aurora Serverless v1 Cluster
  *
  * @resource AWS::RDS::DBCluster
  *
@@ -495,7 +541,6 @@ export class ServerlessCluster extends ServerlessClusterNew {
   public static fromServerlessClusterAttributes(
     scope: Construct, id: string, attrs: ServerlessClusterAttributes,
   ): IServerlessCluster {
-
     return new ImportedServerlessCluster(scope, id, attrs);
   }
 
@@ -513,6 +558,8 @@ export class ServerlessCluster extends ServerlessClusterNew {
 
   constructor(scope: Construct, id: string, props: ServerlessClusterProps) {
     super(scope, id, props);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.vpc = props.vpc;
     this.vpcSubnets = props.vpcSubnets;
@@ -549,19 +596,20 @@ export class ServerlessCluster extends ServerlessClusterNew {
   /**
    * Adds the single user rotation of the master password to this cluster.
    */
+  @MethodMetadata()
   public addRotationSingleUser(options: RotationSingleUserOptions = {}): secretsmanager.SecretRotation {
     if (!this.secret) {
-      throw new Error('Cannot add single user rotation for a cluster without secret.');
+      throw new ValidationError('Cannot add single user rotation for a cluster without secret.', this);
     }
 
     if (this.vpc === undefined) {
-      throw new Error('Cannot add single user rotation for a cluster without VPC.');
+      throw new ValidationError('Cannot add single user rotation for a cluster without VPC.', this);
     }
 
     const id = 'RotationSingleUser';
     const existing = this.node.tryFindChild(id);
     if (existing) {
-      throw new Error('A single user rotation was already added to this cluster.');
+      throw new ValidationError('A single user rotation was already added to this cluster.', this);
     }
 
     return new secretsmanager.SecretRotation(this, id, {
@@ -576,13 +624,14 @@ export class ServerlessCluster extends ServerlessClusterNew {
   /**
    * Adds the multi user rotation to this cluster.
    */
+  @MethodMetadata()
   public addRotationMultiUser(id: string, options: RotationMultiUserOptions): secretsmanager.SecretRotation {
     if (!this.secret) {
-      throw new Error('Cannot add multi user rotation for a cluster without secret.');
+      throw new ValidationError('Cannot add multi user rotation for a cluster without secret.', this);
     }
 
     if (this.vpc === undefined) {
-      throw new Error('Cannot add multi user rotation for a cluster without VPC.');
+      throw new ValidationError('Cannot add multi user rotation for a cluster without VPC.', this);
     }
 
     return new secretsmanager.SecretRotation(this, id, {
@@ -605,13 +654,15 @@ class ImportedServerlessCluster extends ServerlessClusterBase implements IServer
 
   public readonly secret?: secretsmanager.ISecret;
 
-  protected readonly enableDataApi = true
+  protected readonly enableDataApi = true;
 
   private readonly _clusterEndpoint?: Endpoint;
   private readonly _clusterReadEndpoint?: Endpoint;
 
   constructor(scope: Construct, id: string, attrs: ServerlessClusterAttributes) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, attrs);
 
     this.clusterIdentifier = attrs.clusterIdentifier;
 
@@ -629,14 +680,14 @@ class ImportedServerlessCluster extends ServerlessClusterBase implements IServer
 
   public get clusterEndpoint() {
     if (!this._clusterEndpoint) {
-      throw new Error('Cannot access `clusterEndpoint` of an imported cluster without an endpoint address and port');
+      throw new ValidationError('Cannot access `clusterEndpoint` of an imported cluster without an endpoint address and port', this);
     }
     return this._clusterEndpoint;
   }
 
   public get clusterReadEndpoint() {
     if (!this._clusterReadEndpoint) {
-      throw new Error('Cannot access `clusterReadEndpoint` of an imported cluster without a readerEndpointAddress and port');
+      throw new ValidationError('Cannot access `clusterReadEndpoint` of an imported cluster without a readerEndpointAddress and port', this);
     }
     return this._clusterReadEndpoint;
   }
@@ -665,7 +716,7 @@ export interface ServerlessClusterFromSnapshotProps extends ServerlessClusterNew
 }
 
 /**
- * A Aurora Serverless Cluster restored from a snapshot.
+ * A Aurora Serverless v1 Cluster restored from a snapshot.
  *
  * @resource AWS::RDS::DBCluster
  */
@@ -677,6 +728,8 @@ export class ServerlessClusterFromSnapshot extends ServerlessClusterNew {
 
   constructor(scope: Construct, id: string, props: ServerlessClusterFromSnapshotProps) {
     super(scope, id, props);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.enableDataApi = props.enableDataApi;
 
@@ -684,7 +737,7 @@ export class ServerlessClusterFromSnapshot extends ServerlessClusterNew {
     let secret = credentials?.secret;
     if (!secret && credentials?.generatePassword) {
       if (!credentials.username) {
-        throw new Error('`credentials` `username` must be specified when `generatePassword` is set to true');
+        throw new ValidationError('`credentials` `username` must be specified when `generatePassword` is set to true', this);
       }
 
       secret = new DatabaseSecret(this, 'Secret', {

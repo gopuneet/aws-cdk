@@ -4,6 +4,7 @@ import { CfnConfigurationSetEventDestination } from './ses.generated';
 import * as iam from '../../aws-iam';
 import * as sns from '../../aws-sns';
 import { Aws, IResource, Resource } from '../../core';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
 
 /**
  * A configuration set event destination
@@ -45,7 +46,7 @@ export interface ConfigurationSetEventDestinationOptions {
    *
    * @default - send all event types
    */
-  readonly events?: EmailSendingEvent[]
+  readonly events?: EmailSendingEvent[];
 }
 
 /**
@@ -155,7 +156,7 @@ export enum EmailSendingEvent {
    * The email was successfully delivered, but the recipient updated their subscription
    * preferences by clicking on an unsubscribe link as part of your subscription management.
    */
-  SUBSCRIPTION = 'subscription'
+  SUBSCRIPTION = 'subscription',
 }
 
 /**
@@ -237,6 +238,8 @@ export class ConfigurationSetEventDestination extends Resource implements IConfi
     super(scope, id, {
       physicalName: props.configurationSetEventDestinationName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const configurationSet = new CfnConfigurationSetEventDestination(this, 'Resource', {
       configurationSetName: props.configurationSet.configurationSetName,

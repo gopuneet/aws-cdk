@@ -1,5 +1,5 @@
 {
-  "version": "31.0.0",
+  "version": "39.0.0",
   "artifacts": {
     "test-bucket-deployment-deployed-bucket.assets": {
       "type": "cdk:asset-manifest",
@@ -14,10 +14,11 @@
       "environment": "aws://unknown-account/unknown-region",
       "properties": {
         "templateFile": "test-bucket-deployment-deployed-bucket.template.json",
+        "terminationProtection": false,
         "validateOnSynth": false,
         "assumeRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-deploy-role-${AWS::AccountId}-${AWS::Region}",
         "cloudFormationExecutionRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-cfn-exec-role-${AWS::AccountId}-${AWS::Region}",
-        "stackTemplateAssetObjectUrl": "s3://cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}/32bddf4239b8c89e825029de010b348ae264e3e8d2c50e4fab560251f9610820.json",
+        "stackTemplateAssetObjectUrl": "s3://cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}/9a3eb9eb14d361d7363c36f85c657bf8745b1e99b875d95fee047fcbee051313.json",
         "requiresBootstrapStackVersion": 6,
         "bootstrapStackVersionSsmParameter": "/cdk-bootstrap/hnb659fds/version",
         "additionalDependencies": [
@@ -51,10 +52,16 @@
             "data": "DestinationAutoDeleteObjectsCustomResource15E926BA"
           }
         ],
-        "/test-bucket-deployment-deployed-bucket/DefaultCrNodeVersionMap": [
+        "/test-bucket-deployment-deployed-bucket/LatestNodeRuntimeMap": [
           {
             "type": "aws:cdk:logicalId",
-            "data": "DefaultCrNodeVersionMap"
+            "data": "LatestNodeRuntimeMap"
+          }
+        ],
+        "/test-bucket-deployment-deployed-bucket/Custom::S3AutoDeleteObjectsCustomResourceProvider": [
+          {
+            "type": "aws:cdk:is-custom-resource-handler-customResourceProvider",
+            "data": true
           }
         ],
         "/test-bucket-deployment-deployed-bucket/Custom::S3AutoDeleteObjectsCustomResourceProvider/Role": [
@@ -72,13 +79,26 @@
         "/test-bucket-deployment-deployed-bucket/DeployMe5/AwsCliLayer/Resource": [
           {
             "type": "aws:cdk:logicalId",
-            "data": "DeployMe5AwsCliLayerF0F79631"
+            "data": "DeployMe5AwsCliLayerF0F79631",
+            "trace": [
+              "!!DESTRUCTIVE_CHANGES: WILL_REPLACE"
+            ]
           }
         ],
         "/test-bucket-deployment-deployed-bucket/DeployMe5/CustomResource/Default": [
           {
             "type": "aws:cdk:logicalId",
             "data": "DeployMe5CustomResource44BEE629"
+          }
+        ],
+        "/test-bucket-deployment-deployed-bucket/Custom::CDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C": [
+          {
+            "type": "aws:cdk:is-custom-resource-handler-singleton",
+            "data": true
+          },
+          {
+            "type": "aws:cdk:is-custom-resource-handler-runtime-family",
+            "data": 2
           }
         ],
         "/test-bucket-deployment-deployed-bucket/Custom::CDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C/ServiceRole/Resource": [
@@ -139,6 +159,7 @@
       "environment": "aws://unknown-account/unknown-region",
       "properties": {
         "templateFile": "integtestbucketdeploymentsDefaultTestDeployAssertCF25A2DF.template.json",
+        "terminationProtection": false,
         "validateOnSynth": false,
         "assumeRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-deploy-role-${AWS::AccountId}-${AWS::Region}",
         "cloudFormationExecutionRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-cfn-exec-role-${AWS::AccountId}-${AWS::Region}",

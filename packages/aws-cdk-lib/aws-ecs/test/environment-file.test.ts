@@ -14,14 +14,13 @@ describe('environment file', () => {
 
       // THEN
       expect(() => defineContainerDefinition(stack, fileAsset)).toThrow(/Asset must be a single file/);
-
     });
 
     test('only one environment file asset object is created even if multiple container definitions use the same file', () => {
       // GIVEN
       const app = new cdk.App({ context: { [cxapi.NEW_STYLE_STACK_SYNTHESIS_CONTEXT]: false } });
       const stack = new cdk.Stack(app);
-      const fileAsset = ecs.EnvironmentFile.fromAsset(path.join(__dirname, 'demo-envfiles/test-envfile.env'));
+      const fileAsset = ecs.EnvironmentFile.fromAsset(path.join(__dirname, 'demo-envfiles', 'test-envfile.env'));
 
       // WHEN
       const image = ecs.ContainerImage.fromRegistry('/aws/aws-example-app');
@@ -42,7 +41,6 @@ describe('environment file', () => {
 
       // container one has an asset, container two does not
       expect(synthesized.assets.length).toEqual(1);
-
     });
   });
 });

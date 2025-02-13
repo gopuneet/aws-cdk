@@ -8,6 +8,7 @@ import { AddToPrincipalPolicyResult, ArnPrincipal, IPrincipal, PrincipalPolicyFr
 import { AttachedPolicies } from './private/util';
 import { IUser } from './user';
 import { Annotations, ArnFormat, Lazy, Resource, Stack } from '../../core';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
 
 /**
  * Represents an IAM Group.
@@ -183,6 +184,8 @@ export class Group extends GroupBase {
     super(scope, id, {
       physicalName: props.groupName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.managedPolicies.push(...props.managedPolicies || []);
 
@@ -210,6 +213,7 @@ export class Group extends GroupBase {
    * for quota of managed policies attached to an IAM group.
    * @param policy The managed policy to attach.
    */
+  @MethodMetadata()
   public addManagedPolicy(policy: IManagedPolicy) {
     if (this.managedPolicies.find(mp => mp === policy)) { return; }
     this.managedPolicies.push(policy);
@@ -218,7 +222,7 @@ export class Group extends GroupBase {
 
   private managedPoliciesExceededWarning() {
     if (this.managedPolicies.length > 10) {
-      Annotations.of(this).addWarning(`You added ${this.managedPolicies.length} to IAM Group ${this.physicalName}. The maximum number of managed policies attached to an IAM group is 10.`);
+      Annotations.of(this).addWarningV2('@aws-cdk/aws-iam:groupMaxPoliciesExceeded', `You added ${this.managedPolicies.length} to IAM Group ${this.physicalName}. The maximum number of managed policies attached to an IAM group is 10.`);
     }
   }
 }

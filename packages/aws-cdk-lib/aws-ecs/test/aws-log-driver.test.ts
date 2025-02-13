@@ -11,7 +11,6 @@ describe('aws log driver', () => {
   beforeEach(() => {
     stack = new cdk.Stack();
     td = new ecs.FargateTaskDefinition(stack, 'TaskDefinition');
-
   });
 
   test('create an aws log driver', () => {
@@ -24,6 +23,7 @@ describe('aws log driver', () => {
         multilinePattern: 'pattern',
         streamPrefix: 'hello',
         mode: ecs.AwsLogDriverMode.NON_BLOCKING,
+        maxBufferSize: cdk.Size.mebibytes(25),
       }),
     });
 
@@ -44,10 +44,23 @@ describe('aws log driver', () => {
               'awslogs-datetime-format': 'format',
               'awslogs-multiline-pattern': 'pattern',
               'mode': 'non-blocking',
+              'max-buffer-size': '26214400b',
             },
           },
         }),
       ],
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: [{
+          Action: ['logs:CreateLogStream', 'logs:PutLogEvents'],
+          Effect: 'Allow',
+          Resource: {
+            'Fn::GetAtt': ['TaskDefinitionContainerLogGroup4D0A87C1', 'Arn'],
+          },
+        }],
+      },
     });
   });
 
@@ -143,7 +156,31 @@ describe('aws log driver', () => {
       logRetention: logs.RetentionDays.FIVE_DAYS,
       streamPrefix: 'hello',
     })).toThrow(/`logGroup`.*`logRetentionDays`/);
+  });
 
+  test('throws error when specifying maxBufferSize and blocking mode', () => {
+    // GIVEN
+    const logGroup = new logs.LogGroup(stack, 'LogGroup');
+
+    // THEN
+    expect(() => new ecs.AwsLogDriver({
+      logGroup,
+      streamPrefix: 'hello',
+      mode: ecs.AwsLogDriverMode.BLOCKING,
+      maxBufferSize: cdk.Size.mebibytes(25),
+    })).toThrow(/.*maxBufferSize.*/);
+  });
+
+  test('throws error when specifying maxBufferSize and default settings', () => {
+    // GIVEN
+    const logGroup = new logs.LogGroup(stack, 'LogGroup');
+
+    // THEN
+    expect(() => new ecs.AwsLogDriver({
+      logGroup,
+      streamPrefix: 'hello',
+      maxBufferSize: cdk.Size.mebibytes(25),
+    })).toThrow(/.*maxBufferSize.*/);
   });
 
   test('allows cross-region log group', () => {

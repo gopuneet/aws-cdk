@@ -1,7 +1,9 @@
-import { Construct } from 'constructs';
+import { Construct, IConstruct } from 'constructs';
 import { NotificationsResourceHandler } from './notifications-resource-handler';
 import * as iam from '../../../aws-iam';
 import * as cdk from '../../../core';
+import { ValidationError } from '../../../core/lib/errors';
+import * as cxapi from '../../../cx-api';
 import { Bucket, IBucket, EventType, NotificationKeyFilter } from '../bucket';
 import { BucketNotificationDestinationType, IBucketNotificationDestination } from '../destination';
 
@@ -15,6 +17,11 @@ interface NotificationsProps {
    * The role to be used by the lambda handler
    */
   handlerRole?: iam.IRole;
+
+  /**
+   * Skips notification validation of Amazon SQS, Amazon SNS, and Lambda destinations.
+   */
+  skipDestinationValidation: boolean;
 }
 
 /**
@@ -40,11 +47,13 @@ export class BucketNotifications extends Construct {
   private resource?: cdk.CfnResource;
   private readonly bucket: IBucket;
   private readonly handlerRole?: iam.IRole;
+  private readonly skipDestinationValidation: boolean;
 
   constructor(scope: Construct, id: string, props: NotificationsProps) {
     super(scope, id);
     this.bucket = props.bucket;
     this.handlerRole = props.handlerRole;
+    this.skipDestinationValidation = props.skipDestinationValidation;
   }
 
   /**
@@ -63,7 +72,7 @@ export class BucketNotifications extends Construct {
     const targetProps = target.bind(this, this.bucket);
     const commonConfig: CommonConfiguration = {
       Events: [event],
-      Filter: renderFilters(filters),
+      Filter: renderFilters(filters, this),
     };
 
     // if the target specifies any dependencies, add them to the custom resource.
@@ -88,7 +97,7 @@ export class BucketNotifications extends Construct {
         break;
 
       default:
-        throw new Error('Unsupported notification target type:' + BucketNotificationDestinationType[targetProps.type]);
+        throw new ValidationError('Unsupported notification target type:' + BucketNotificationDestinationType[targetProps.type], this);
     }
   }
 
@@ -117,7 +126,14 @@ export class BucketNotifications extends Construct {
         role: this.handlerRole,
       });
 
-      const managed = this.bucket instanceof Bucket;
+      let managed = this.bucket instanceof Bucket;
+
+      // We should treat buckets as unmanaged because it will not remove notifications added somewhere else
+      // Ading a feature flag to prevent it brings unexpected changes to customers
+      // Put it here because we still need to create the permission if it's unmanaged bucket.
+      if (cdk.FeatureFlags.of(this).isEnabled(cxapi.S3_KEEP_NOTIFICATION_IN_IMPORTED_BUCKET)) {
+        managed = false;
+      }
 
       if (!managed) {
         handler.addToRolePolicy(new iam.PolicyStatement({
@@ -133,6 +149,21 @@ export class BucketNotifications extends Construct {
           BucketName: this.bucket.bucketName,
           NotificationConfiguration: cdk.Lazy.any({ produce: () => this.renderNotificationConfiguration() }),
           Managed: managed,
+          SkipDestinationValidation: this.skipDestinationValidation,
+        },
+      });
+
+      // Add dependency on bucket policy if it exists to avoid race conditions
+      // S3 does not allow calling PutBucketPolicy and PutBucketNotification APIs at the same time
+      // See https://github.com/aws/aws-cdk/issues/27600
+      // Aspects are used here because bucket policy maybe added to construct after addition of notification resource.
+      const bucket = this.bucket;
+      const resource = this.resource;
+      cdk.Aspects.of(this).add({
+        visit(node: IConstruct) {
+          if (node === resource && bucket.policy) {
+            node.node.addDependency(bucket.policy);
+          }
         },
       });
     }
@@ -141,7 +172,7 @@ export class BucketNotifications extends Construct {
   }
 }
 
-function renderFilters(filters?: NotificationKeyFilter[]): Filter | undefined {
+function renderFilters(filters: NotificationKeyFilter[], scope: BucketNotifications): Filter | undefined {
   if (!filters || filters.length === 0) {
     return undefined;
   }
@@ -152,12 +183,12 @@ function renderFilters(filters?: NotificationKeyFilter[]): Filter | undefined {
 
   for (const rule of filters) {
     if (!rule.suffix && !rule.prefix) {
-      throw new Error('NotificationKeyFilter must specify `prefix` and/or `suffix`');
+      throw new ValidationError('NotificationKeyFilter must specify `prefix` and/or `suffix`', scope);
     }
 
     if (rule.suffix) {
       if (hasSuffix) {
-        throw new Error('Cannot specify more than one suffix rule in a filter.');
+        throw new ValidationError('Cannot specify more than one suffix rule in a filter.', scope);
       }
       renderedRules.push({ Name: 'suffix', Value: rule.suffix });
       hasSuffix = true;
@@ -165,7 +196,7 @@ function renderFilters(filters?: NotificationKeyFilter[]): Filter | undefined {
 
     if (rule.prefix) {
       if (hasPrefix) {
-        throw new Error('Cannot specify more than one prefix rule in a filter.');
+        throw new ValidationError('Cannot specify more than one prefix rule in a filter.', scope);
       }
       renderedRules.push({ Name: 'prefix', Value: rule.prefix });
       hasPrefix = true;
@@ -189,7 +220,7 @@ interface NotificationConfiguration {
 interface CommonConfiguration {
   Id?: string;
   Events: EventType[];
-  Filter?: Filter
+  Filter?: Filter;
 }
 
 interface EventBridgeConfiguration { }
@@ -212,5 +243,5 @@ interface FilterRule {
 }
 
 interface Filter {
-  Key: { FilterRules: FilterRule[] }
+  Key: { FilterRules: FilterRule[] };
 }

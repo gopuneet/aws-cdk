@@ -1,6 +1,7 @@
 import { parallelPromises } from './parallel';
 import { WorkNode, DeploymentState, StackNode, AssetBuildNode, AssetPublishNode } from './work-graph-types';
 import { debug, trace } from '../logging';
+import { ToolkitError } from '../toolkit/error';
 
 export type Concurrency = number | Record<WorkNode['type'], number>;
 
@@ -17,7 +18,7 @@ export class WorkGraph {
   public addNodes(...nodes: WorkNode[]) {
     for (const node of nodes) {
       if (this.nodes[node.id]) {
-        throw new Error(`Duplicate use of node id: ${node.id}`);
+        throw new ToolkitError(`Duplicate use of node id: ${node.id}`);
       }
 
       const ld = this.lazyDependencies.get(node.id);
@@ -85,7 +86,7 @@ export class WorkGraph {
   public node(id: string) {
     const ret = this.nodes[id];
     if (!ret) {
-      throw new Error(`No node with id ${id} among ${Object.keys(this.nodes)}`);
+      throw new ToolkitError(`No node with id ${id} among ${Object.keys(this.nodes)}`);
     }
     return ret;
   }
@@ -217,19 +218,16 @@ export class WorkGraph {
     function renderNode(id: string, node: WorkNode): string[] {
       const ret = [];
       if (node.deploymentState === DeploymentState.COMPLETED) {
-        ret.push(`  "${simplifyId(id)}" [style=filled,fillcolor=yellow];`);
+        ret.push(`  ${gv(id, { style: 'filled', fillcolor: 'yellow', comment: node.note })};`);
       } else {
-        ret.push(`  "${simplifyId(id)}";`);
+        ret.push(`  ${gv(id, { comment: node.note })};`);
       }
       for (const dep of node.dependencies) {
-        ret.push(`  "${simplifyId(id)}" -> "${simplifyId(dep)}";`);
+        ret.push(`  ${gv(id)} -> ${gv(dep)};`);
       }
       return ret;
     }
 
-    function simplifyId(id: string) {
-      return id.replace(/([0-9a-f]{6})[0-9a-f]{6,}/g, '$1');
-    }
   }
 
   /**
@@ -300,7 +298,7 @@ export class WorkGraph {
     if (this.readyPool.length === 0 && activeCount === 0 && pendingCount > 0) {
       const cycle = this.findCycle() ?? ['No cycle found!'];
       trace(`Cycle ${cycle.join(' -> ')} in graph ${this}`);
-      throw new Error(`Unable to make progress anymore, dependency cycle between remaining artifacts: ${cycle.join(' -> ')} (run with -vv for full graph)`);
+      throw new ToolkitError(`Unable to make progress anymore, dependency cycle between remaining artifacts: ${cycle.join(' -> ')} (run with -vv for full graph)`);
     }
   }
 
@@ -391,4 +389,14 @@ function sum(xs: number[]) {
 
 function retainOnly<A>(xs: A[], pred: (x: A) => boolean) {
   xs.splice(0, xs.length, ...xs.filter(pred));
+}
+
+function gv(id: string, attrs?: Record<string, string | undefined>) {
+  const attrString = Object.entries(attrs ?? {}).flatMap(([k, v]) => v !== undefined ? [`${k}="${v}"`] : []).join(',');
+
+  return attrString ? `"${simplifyId(id)}" [${attrString}]` : `"${simplifyId(id)}"`;
+}
+
+function simplifyId(id: string) {
+  return id.replace(/([0-9a-f]{6})[0-9a-f]{6,}/g, '$1');
 }

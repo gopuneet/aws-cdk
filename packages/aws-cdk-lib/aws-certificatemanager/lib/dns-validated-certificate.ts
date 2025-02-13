@@ -1,13 +1,12 @@
-import * as path from 'path';
 import { Construct } from 'constructs';
 import { CertificateProps, ICertificate } from './certificate';
 import { CertificateBase } from './certificate-base';
 import * as iam from '../../aws-iam';
-import * as lambda from '../../aws-lambda';
 import * as route53 from '../../aws-route53';
 import * as cdk from '../../core';
 import { Token } from '../../core';
-import { builtInCustomResourceNodeRuntime } from '../../custom-resources';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
+import { CertificateRequestCertificateRequestFunction } from '../../custom-resource-handlers/dist/aws-certificatemanager/certificate-request-provider.generated';
 
 /**
  * Properties to create a DNS validated certificate managed by AWS Certificate Manager
@@ -73,9 +72,9 @@ export class DnsValidatedCertificate extends CertificateBase implements ICertifi
   public readonly certificateArn: string;
 
   /**
-  * Resource Tags.
-  * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-certificatemanager-certificate.html#cfn-certificatemanager-certificate-tags
-  */
+   * Resource Tags.
+   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-certificatemanager-certificate.html#cfn-certificatemanager-certificate-tags
+   */
 
   public readonly tags: cdk.TagManager;
   protected readonly region?: string;
@@ -86,6 +85,14 @@ export class DnsValidatedCertificate extends CertificateBase implements ICertifi
 
   constructor(scope: Construct, id: string, props: DnsValidatedCertificateProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
+
+    if (props.keyAlgorithm) {
+      cdk.Annotations.of(this)
+        .addWarningV2('@aws-cdk/aws-certificatemanager:keyAlgorithmIgnored',
+          'keyAlgorithm is ignored for DnsValidatedCertificate construct.');
+    }
 
     this.region = props.region;
     this.domainName = props.domainName;
@@ -107,10 +114,7 @@ export class DnsValidatedCertificate extends CertificateBase implements ICertifi
       certificateTransparencyLoggingPreference = props.transparencyLoggingEnabled ? 'ENABLED' : 'DISABLED';
     }
 
-    const requestorFunction = new lambda.Function(this, 'CertificateRequestorFunction', {
-      code: lambda.Code.fromAsset(path.resolve(__dirname, '..', 'lambda-packages', 'dns_validated_certificate_handler', 'lib')),
-      handler: 'index.certificateRequestHandler',
-      runtime: builtInCustomResourceNodeRuntime(this),
+    const requestorFunction = new CertificateRequestCertificateRequestFunction(this, 'CertificateRequestorFunction', {
       timeout: cdk.Duration.minutes(15),
       role: props.customResourceRole,
     });
@@ -160,6 +164,7 @@ export class DnsValidatedCertificate extends CertificateBase implements ICertifi
     this.node.addValidation({ validate: () => this.validateDnsValidatedCertificate() });
   }
 
+  @MethodMetadata()
   public applyRemovalPolicy(policy: cdk.RemovalPolicy): void {
     this._removalPolicy = policy;
   }

@@ -33,7 +33,7 @@ new python.PythonFunction(this, 'MyFunction', {
 });
 ```
 
-All other properties of `lambda.Function` are supported, see also the [AWS Lambda construct library](https://github.com/aws/aws-cdk/tree/main/packages/%40aws-cdk/aws-lambda).
+All other properties of `lambda.Function` are supported, see also the [AWS Lambda construct library](https://github.com/aws/aws-cdk/tree/main/packages/aws-cdk-lib/aws-lambda).
 
 ## Python Layer
 
@@ -111,7 +111,7 @@ Packaging is executed using the `Packaging` class, which:
 
 **Excluding source files**
 
-You can exclude files from being copied using the optional bundling string array parameter `assetExcludes`
+You can exclude files from being copied using the optional bundling string array parameter `assetExcludes`:
 
 ```ts
 new python.PythonFunction(this, 'function', {
@@ -124,6 +124,33 @@ new python.PythonFunction(this, 'function', {
 });
 ```
 
+**Including hashes**
+
+You can include hashes in `poetry` using the optional boolean parameter `poetryIncludeHashes`:
+
+```ts
+new python.PythonFunction(this, 'function', {
+  entry: '/path/to/poetry-function',
+  runtime: Runtime.PYTHON_3_8,
+  bundling: {
+    poetryIncludeHashes: true,
+  },
+});
+```
+
+**Excluding URLs**
+
+You can exclude URLs in `poetry` using the optional boolean parameter `poetryWithoutUrls`:
+
+```ts
+new python.PythonFunction(this, 'function', {
+  entry: '/path/to/poetry-function',
+  runtime: Runtime.PYTHON_3_8,
+  bundling: {
+    poetryWithoutUrls: true,
+  },
+});
+```
 
 ## Custom Bundling
 
@@ -206,7 +233,7 @@ new python.PythonFunction(this, 'function', {
 });
 ```
 
-The index URL or the token are only used during bundling and thus not included in the final asset. Setting only environment variable for `PIP_INDEX_URL` or `PIP_EXTRA_INDEX_URL` should work for accesing private Python repositories with `pip`, `pipenv` and `poetry` based dependencies.
+The index URL or the token are only used during bundling and thus not included in the final asset. Setting only environment variable for `PIP_INDEX_URL` or `PIP_EXTRA_INDEX_URL` should work for accessing private Python repositories with `pip`, `pipenv` and `poetry` based dependencies.
 
 If you also want to use the Code Artifact repo for building the base Docker image for bundling, use `buildArgs`. However, note that setting custom build args for bundling will force the base bundling image to be rebuilt every time (i.e. skip the Docker cache). Build args can be customized as:
 
@@ -272,7 +299,7 @@ container for Docker bundling or on the host OS for local bundling.
 ## Docker based bundling in complex Docker configurations
 
 By default the input and output of Docker based bundling is handled via bind mounts.
-In situtations where this does not work, like Docker-in-Docker setups or when using a remote Docker socket, you can configure an alternative, but slower, variant that also works in these situations.
+In situations where this does not work, like Docker-in-Docker setups or when using a remote Docker socket, you can configure an alternative, but slower, variant that also works in these situations.
 
 ```ts
 const entry = '/path/to/function';

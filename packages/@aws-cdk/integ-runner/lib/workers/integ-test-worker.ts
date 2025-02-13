@@ -44,7 +44,7 @@ export interface IntegTestRunOptions extends IntegTestOptions {
 /**
  * Run Integration tests.
  */
-export async function runIntegrationTests(options: IntegTestRunOptions): Promise<{ success: boolean, metrics: IntegRunnerMetrics[] }> {
+export async function runIntegrationTests(options: IntegTestRunOptions): Promise<{ success: boolean; metrics: IntegRunnerMetrics[] }> {
   logger.highlight('\nRunning integration tests for failed tests...\n');
   logger.print(
     'Running in parallel across %sregions: %s',
@@ -111,7 +111,6 @@ function getAccountWorkers(regions: string[], profiles?: string[]): AccountWorke
 export async function runIntegrationTestsInParallel(
   options: IntegTestRunOptions,
 ): Promise<IntegBatchResponse> {
-
   const queue = options.tests;
   const results: IntegBatchResponse = {
     metrics: [],
@@ -128,6 +127,7 @@ export async function runIntegrationTestsInParallel(
       const testStart = Date.now();
       logger.highlight(`Running test ${test.fileName} in ${worker.profile ? worker.profile + '/' : ''}${worker.region}`);
       const response: IntegTestInfo[][] = await options.pool.exec('integTestWorker', [{
+        watch: options.watch,
         region: worker.region,
         profile: worker.profile,
         tests: [test],
@@ -154,6 +154,8 @@ export async function runIntegrationTestsInParallel(
   }
 
   const workers = accountWorkers.map((worker) => runTest(worker));
+  // Workers are their own concurrency limits
+  // eslint-disable-next-line @cdklabs/promiseall-no-unbounded-parallelism
   await Promise.all(workers);
   return results;
 }

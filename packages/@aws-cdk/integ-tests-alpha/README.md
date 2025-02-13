@@ -33,7 +33,7 @@ we would need to create a file to contain our integration test application.
 const app = new App();
 const stack = new Stack();
 new lambda.Function(stack, 'MyFunction', {
-  runtime: lambda.Runtime.NODEJS_14_X,
+  runtime: lambda.Runtime.NODEJS_LATEST,
   handler: 'index.handler',
   code: lambda.Code.fromAsset(path.join(__dirname, 'lambda-handler')),
 });
@@ -75,7 +75,7 @@ class StackUnderTest extends Stack {
     super(scope, id, props);
 	
     new lambda.Function(this, 'Handler', {
-      runtime: lambda.Runtime.NODEJS_14_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
       handler: 'index.handler',
       code: lambda.Code.fromAsset(path.join(__dirname, 'lambda-handler')),
       architecture: props.architecture,
@@ -99,7 +99,7 @@ class StackUnderTest extends Stack {
     super(scope, id, props);
 	
     new lambda.Function(this, 'Handler', {
-      runtime: lambda.Runtime.NODEJS_14_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
       handler: 'index.handler',
       code: lambda.Code.fromAsset(path.join(__dirname, 'lambda-handler')),
       architecture: props.architecture,
@@ -241,12 +241,43 @@ integ.assertions.expect(
 In the above example an assertion is created that will trigger a user defined `CustomResource`
 and assert that the `data` attribute is equal to `{ foo: 'bar' }`.
 
-### AwsApiCall
+### API Calls
 
 A common method to retrieve the "actual" results to compare with what is expected is to make an
-AWS API call to receive some data. This library does this by utilizing CloudFormation custom resources
+API call to receive some data. This library does this by utilizing CloudFormation custom resources
 which means that CloudFormation will call out to a Lambda Function which will
-use the AWS JavaScript SDK to make the API call.
+make the API call.
+
+#### HttpApiCall
+
+Using the `HttpApiCall` will use the
+[node-fetch](https://github.com/node-fetch/node-fetch) JavaScript library to
+make the HTTP call.
+
+This can be done by using the class directory (in the case of a normal deployment):
+
+```ts
+declare const stack: Stack;
+
+new HttpApiCall(stack, 'MyAsssertion', {
+  url: 'https://example-api.com/abc',
+});
+```
+
+Or by using the `httpApiCall` method on `DeployAssert` (when writing integration tests):
+
+```ts
+declare const app: App;
+declare const stack: Stack;
+const integ = new IntegTest(app, 'Integ', {
+  testCases: [stack],
+});
+integ.assertions.httpApiCall('https://example-api.com/abc');
+```
+
+#### AwsApiCall
+
+Using the `AwsApiCall` construct will use the AWS JavaScript SDK to make the API call.
 
 This can be done by using the class directory (in the case of a normal deployment):
 
@@ -275,6 +306,20 @@ integ.assertions.awsApiCall('SQS', 'receiveMessage', {
 });
 ```
 
+You must specify the `service` and the `api` when using The `AwsApiCall` construct.
+The `service` is the name of an AWS service, in one of the following forms:
+
+- An AWS SDK for JavaScript v3 package name (`@aws-sdk/client-api-gateway`)
+- An AWS SDK for JavaScript v3 client name (`api-gateway`)
+- An AWS SDK for JavaScript v2 constructor name (`APIGateway`)
+- A lowercase AWS SDK for JavaScript v2 constructor name (`apigateway`)
+
+The `api` is the name of an AWS API call, in one of the following forms:
+
+- An API call name as found in the API Reference documentation (`GetObject`)
+- The API call name starting with a lowercase letter (`getObject`)
+- The AWS SDK for JavaScript v3 command class name (`GetObjectCommand`)
+
 By default, the `AwsApiCall` construct will automatically add the correct IAM policies
 to allow the Lambda function to make the API call. It does this based on the `service`
 and `api` that is provided. In the above example the service is `SQS` and the api is
@@ -294,6 +339,23 @@ const apiCall = integ.assertions.awsApiCall('S3', 'listObjectsV2', {
 });
 
 apiCall.provider.addToRolePolicy({
+  Effect: 'Allow',
+  Action: ['s3:GetObject', 's3:ListBucket'],
+  Resource: ['*'],
+});
+```
+
+When executing `waitForAssertion()`, it is necessary to add an IAM policy using `waiterProvider.addToRolePolicy()`.
+Because `IApiCall` does not have a `waiterProvider` property, you need to cast it to `AwsApiCall`.
+
+```ts
+declare const integ: IntegTest;
+
+const apiCall = integ.assertions.awsApiCall('S3', 'listObjectsV2', {
+  Bucket: 'mybucket',
+}).waitForAssertions() as AwsApiCall;
+
+apiCall.waiterProvider?.addToRolePolicy({
   Effect: 'Allow',
   Action: ['s3:GetObject', 's3:ListBucket'],
   Resource: ['*'],
@@ -394,6 +456,28 @@ invoke.expect(ExpectedResult.objectLike({
 }));
 ```
 
+The above example will by default create a CloudWatch log group that's never
+expired. If you want to configure it with custom log retention days, you need
+to specify the `logRetention` property.
+
+```ts
+import * as logs from 'aws-cdk-lib/aws-logs';
+
+declare const lambdaFunction: lambda.IFunction;
+declare const app: App;
+
+const stack = new Stack(app, 'cdk-integ-lambda-bundling');
+
+const integ = new IntegTest(app, 'IntegTest', {
+  testCases: [stack],
+});
+
+const invoke = integ.assertions.invokeFunction({
+  functionName: lambdaFunction.functionName,
+  logRetention: logs.RetentionDays.ONE_WEEK,
+});
+```
+
 #### Make an AWS API Call
 
 In this example there is a StepFunctions state machine that is executed
@@ -433,11 +517,11 @@ need to do is add a dependency between the calls. There is an helper method `nex
 declare const integ: IntegTest;
 
 integ.assertions.awsApiCall('S3', 'putObject', {
-  Bucket: 'my-bucket',
+  Bucket: 'amzn-s3-demo-bucket',
   Key: 'my-key',
   Body: 'helloWorld',
 }).next(integ.assertions.awsApiCall('S3', 'getObject', {
-  Bucket: 'my-bucket',
+  Bucket: 'amzn-s3-demo-bucket',
   Key: 'my-key',
 }));
 ```

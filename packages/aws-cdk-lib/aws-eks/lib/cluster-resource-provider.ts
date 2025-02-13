@@ -1,13 +1,10 @@
-import * as path from 'path';
 import { Construct } from 'constructs';
 import * as ec2 from '../../aws-ec2';
 import * as lambda from '../../aws-lambda';
 import { Duration, NestedStack, Stack } from '../../core';
+import { ClusterResourceOnEventFunction, ClusterResourceIsCompleteFunction } from '../../custom-resource-handlers/dist/aws-eks/cluster-resource-provider.generated';
 import * as cr from '../../custom-resources';
 import { NodeProxyAgentLayer } from '../../lambda-layer-node-proxy-agent';
-
-const HANDLER_DIR = path.join(__dirname, 'cluster-resource-handler');
-const HANDLER_RUNTIME = lambda.Runtime.NODEJS_14_X;
 
 export interface ClusterResourceProviderProps {
 
@@ -49,7 +46,6 @@ export interface ClusterResourceProviderProps {
  * @internal
  */
 export class ClusterResourceProvider extends NestedStack {
-
   public static getOrCreate(scope: Construct, props: ClusterResourceProviderProps) {
     const stack = Stack.of(scope);
     const uid = '@aws-cdk/aws-eks.ClusterResourceProvider';
@@ -67,15 +63,12 @@ export class ClusterResourceProvider extends NestedStack {
     // The NPM dependency proxy-agent is required in order to support proxy routing with the AWS JS SDK.
     const nodeProxyAgentLayer = new NodeProxyAgentLayer(this, 'NodeProxyAgentLayer');
 
-    const onEvent = new lambda.Function(this, 'OnEventHandler', {
-      code: lambda.Code.fromAsset(HANDLER_DIR),
+    const onEvent = new ClusterResourceOnEventFunction(this, 'OnEventHandler', {
       description: 'onEvent handler for EKS cluster resource provider',
-      runtime: HANDLER_RUNTIME,
       environment: {
         AWS_STS_REGIONAL_ENDPOINTS: 'regional',
         ...props.environment,
       },
-      handler: 'index.onEvent',
       timeout: Duration.minutes(1),
       vpc: props.subnets ? props.vpc : undefined,
       vpcSubnets: props.subnets ? { subnets: props.subnets } : undefined,
@@ -84,15 +77,12 @@ export class ClusterResourceProvider extends NestedStack {
       layers: props.onEventLayer ? [props.onEventLayer] : [nodeProxyAgentLayer],
     });
 
-    const isComplete = new lambda.Function(this, 'IsCompleteHandler', {
-      code: lambda.Code.fromAsset(HANDLER_DIR),
+    const isComplete = new ClusterResourceIsCompleteFunction(this, 'IsCompleteHandler', {
       description: 'isComplete handler for EKS cluster resource provider',
-      runtime: HANDLER_RUNTIME,
       environment: {
         AWS_STS_REGIONAL_ENDPOINTS: 'regional',
         ...props.environment,
       },
-      handler: 'index.isComplete',
       timeout: Duration.minutes(1),
       vpc: props.subnets ? props.vpc : undefined,
       vpcSubnets: props.subnets ? { subnets: props.subnets } : undefined,

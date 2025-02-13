@@ -8,6 +8,7 @@ import * as ec2 from '../../../aws-ec2';
 import * as iam from '../../../aws-iam';
 import * as s3 from '../../../aws-s3';
 import * as cdk from '../../../core';
+import { addConstructMetadata, MethodMetadata } from '../../../core/lib/metadata-resource';
 import { CODEDEPLOY_REMOVE_ALARMS_FROM_DEPLOYMENT_GROUP } from '../../../cx-api';
 import { CfnDeploymentGroup } from '../codedeploy.generated';
 import { ImportedDeploymentGroupBase, DeploymentGroupBase } from '../private/base-deployment-group';
@@ -67,6 +68,8 @@ class ImportedServerDeploymentGroup extends ImportedDeploymentGroupBase implemen
       application: props.application,
       deploymentGroupName: props.deploymentGroupName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.application = props.application;
     this.deploymentConfig = this._bindDeploymentConfig(props.deploymentConfig || ServerDeploymentConfig.ONE_AT_A_TIME);
@@ -168,8 +171,18 @@ export interface ServerDeploymentGroupProps {
    * or an Application Load Balancer / Network Load Balancer Target Group.
    *
    * @default - Deployment Group will not have a load balancer defined.
+   * @deprecated - Use `loadBalancers` instead.
    */
   readonly loadBalancer?: LoadBalancer;
+
+  /**
+   * CodeDeploy supports the deployment to multiple load balancers.
+   * Specify either multiple Classic Load Balancers, or
+   * Application Load Balancers / Network Load Balancers Target Groups.
+   *
+   * @default - Deployment Group will not have load balancers defined.
+   */
+  readonly loadBalancers?: LoadBalancer[];
 
   /**
    * All EC2 instances matching the given set of tags when a deployment occurs will be added to this Deployment Group.
@@ -210,6 +223,22 @@ export interface ServerDeploymentGroupProps {
    * @default - default AutoRollbackConfig.
    */
   readonly autoRollback?: AutoRollbackConfig;
+
+  /**
+   * Whether to skip the step of checking CloudWatch alarms during the deployment process
+   *
+   * @default - false
+   */
+  readonly ignoreAlarmConfiguration?: boolean;
+
+  /**
+   * Indicates whether the deployment group was configured to have CodeDeploy install a termination hook into an Auto Scaling group.
+   *
+   * @see https://docs.aws.amazon.com/codedeploy/latest/userguide/integrations-aws-auto-scaling.html#integrations-aws-auto-scaling-behaviors
+   *
+   * @default - false
+   */
+  readonly terminationHook?: boolean;
 }
 
 /**
@@ -244,6 +273,7 @@ export class ServerDeploymentGroup extends DeploymentGroupBase implements IServe
   private readonly installAgent: boolean;
   private readonly codeDeployBucket: s3.IBucket;
   private readonly alarms: cloudwatch.IAlarm[];
+  private readonly loadBalancers?: LoadBalancer[];
 
   constructor(scope: Construct, id: string, props: ServerDeploymentGroupProps = {}) {
     super(scope, id, {
@@ -251,6 +281,8 @@ export class ServerDeploymentGroup extends DeploymentGroupBase implements IServe
       role: props.role,
       roleConstructId: 'Role',
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
     this.role = this._role;
 
     this.application = props.application || new ServerApplication(this, 'Application', {
@@ -262,6 +294,12 @@ export class ServerDeploymentGroup extends DeploymentGroupBase implements IServe
     this._autoScalingGroups = props.autoScalingGroups || [];
     this.installAgent = props.installAgent ?? true;
     this.codeDeployBucket = s3.Bucket.fromBucketName(this, 'Bucket', `aws-codedeploy-${cdk.Stack.of(this).region}`);
+    this.loadBalancers = props.loadBalancers || (props.loadBalancer ? [props.loadBalancer]: undefined);
+
+    if (this.loadBalancers && this.loadBalancers.length === 0) {
+      throw new Error('loadBalancers must be a non-empty array');
+    }
+
     for (const asg of this._autoScalingGroups) {
       this.addCodeDeployAgentInstallUserData(asg);
     }
@@ -277,8 +315,8 @@ export class ServerDeploymentGroup extends DeploymentGroupBase implements IServe
       deploymentConfigName: props.deploymentConfig &&
         props.deploymentConfig.deploymentConfigName,
       autoScalingGroups: cdk.Lazy.list({ produce: () => this._autoScalingGroups.map(asg => asg.autoScalingGroupName) }, { omitEmpty: true }),
-      loadBalancerInfo: this.loadBalancerInfo(props.loadBalancer),
-      deploymentStyle: props.loadBalancer === undefined
+      loadBalancerInfo: this.loadBalancersInfo(this.loadBalancers),
+      deploymentStyle: this.loadBalancers === undefined
         ? undefined
         : {
           deploymentOption: 'WITH_TRAFFIC_CONTROL',
@@ -286,9 +324,15 @@ export class ServerDeploymentGroup extends DeploymentGroupBase implements IServe
       ec2TagSet: this.ec2TagSet(props.ec2InstanceTags),
       onPremisesTagSet: this.onPremiseTagSet(props.onPremiseInstanceTags),
       alarmConfiguration: cdk.Lazy.any({
-        produce: () => renderAlarmConfiguration(this.alarms, props.ignorePollAlarmsFailure, removeAlarmsFromDeploymentGroup),
+        produce: () => renderAlarmConfiguration({
+          alarms: this.alarms,
+          ignorePollAlarmFailure: props.ignorePollAlarmsFailure,
+          removeAlarms: removeAlarmsFromDeploymentGroup,
+          ignoreAlarmConfiguration: props.ignoreAlarmConfiguration,
+        }),
       }),
       autoRollbackConfiguration: cdk.Lazy.any({ produce: () => renderAutoRollbackConfiguration(this.alarms, props.autoRollback) }),
+      terminationHookEnabled: props.terminationHook,
     });
 
     this._setNameAndArn(resource, this.application);
@@ -301,6 +345,7 @@ export class ServerDeploymentGroup extends DeploymentGroupBase implements IServe
    * [disable-awslint:ref-via-interface] is needed in order to install the code
    * deploy agent by updating the ASGs user data.
    */
+  @MethodMetadata()
   public addAutoScalingGroup(asg: autoscaling.AutoScalingGroup): void {
     this._autoScalingGroups.push(asg);
     this.addCodeDeployAgentInstallUserData(asg);
@@ -311,6 +356,7 @@ export class ServerDeploymentGroup extends DeploymentGroupBase implements IServe
    *
    * @param alarm the alarm to associate with this Deployment Group
    */
+  @MethodMetadata()
   public addAlarm(alarm: cloudwatch.IAlarm): void {
     this.alarms.push(alarm);
   }
@@ -369,26 +415,25 @@ export class ServerDeploymentGroup extends DeploymentGroupBase implements IServe
     }
   }
 
-  private loadBalancerInfo(loadBalancer?: LoadBalancer):
+  private loadBalancersInfo(loadBalancers?: LoadBalancer[]):
   CfnDeploymentGroup.LoadBalancerInfoProperty | undefined {
-    if (!loadBalancer) {
-      return undefined;
-    }
-
-    switch (loadBalancer.generation) {
-      case LoadBalancerGeneration.FIRST:
-        return {
-          elbInfoList: [
-            { name: loadBalancer.name },
-          ],
-        };
-      case LoadBalancerGeneration.SECOND:
-        return {
-          targetGroupInfoList: [
-            { name: loadBalancer.name },
-          ],
-        };
-    }
+    return loadBalancers?.reduce((accumulator : {
+      elbInfoList?: {name: string}[];
+      targetGroupInfoList?: {name: string}[];
+    }, loadBalancer: LoadBalancer) => {
+      switch (loadBalancer.generation) {
+        case LoadBalancerGeneration.FIRST:
+          if (!accumulator.elbInfoList) accumulator.elbInfoList = [];
+          accumulator.elbInfoList.push({ name: loadBalancer.name });
+          return accumulator;
+        case LoadBalancerGeneration.SECOND:
+          if (!accumulator.targetGroupInfoList) accumulator.targetGroupInfoList = [];
+          accumulator.targetGroupInfoList.push({ name: loadBalancer.name });
+          return accumulator;
+        default:
+          return accumulator;
+      }
+    }, {});
   }
 
   private ec2TagSet(tagSet?: InstanceTagSet):

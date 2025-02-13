@@ -3,7 +3,7 @@ import * as iam from '../../aws-iam';
 import * as logs from '../../aws-logs';
 import * as s3 from '../../aws-s3';
 import { RemovalPolicy, Stack } from '../../core';
-import { FlowLog, FlowLogDestination, FlowLogResourceType, FlowLogMaxAggregationInterval, LogFormat, Vpc } from '../lib';
+import { FlowLog, FlowLogDestination, FlowLogResourceType, FlowLogMaxAggregationInterval, LogFormat, Vpc, FlowLogTrafficType } from '../lib';
 
 describe('vpc flow logs', () => {
   test('with defaults set, it successfully creates with cloudwatch logs destination', () => {
@@ -28,7 +28,6 @@ describe('vpc flow logs', () => {
     Template.fromStack(stack).resourceCountIs('AWS::Logs::LogGroup', 1);
     Template.fromStack(stack).resourceCountIs('AWS::IAM::Role', 1);
     Template.fromStack(stack).resourceCountIs('AWS::S3::Bucket', 0);
-
   });
   test('with cloudwatch logs as the destination, allows use of existing resources', () => {
     const stack = getTestStack();
@@ -53,7 +52,6 @@ describe('vpc flow logs', () => {
       RoleName: 'TestName',
     });
     Template.fromStack(stack).resourceCountIs('AWS::S3::Bucket', 0);
-
   });
   test('with s3 as the destination, allows use of existing resources', () => {
     const stack = getTestStack();
@@ -75,7 +73,50 @@ describe('vpc flow logs', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::S3::Bucket', {
       BucketName: 'testbucket',
     });
+  });
+  test('with kinesis data firehose as the destination, allows use of existing resources', () => {
+    const stack = getTestStack();
 
+    const deliveryStreamArn = Stack.of(stack).formatArn({
+      resource: 'deliverystream',
+      region: '',
+      service: 'firehose',
+      account: '',
+      resourceName: 'testdeliverystream',
+    });
+    new FlowLog(stack, 'FlowLogs', {
+      resourceType: FlowLogResourceType.fromNetworkInterfaceId('eni-123456'),
+      destination: FlowLogDestination.toKinesisDataFirehoseDestination(
+        deliveryStreamArn,
+      ),
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::EC2::FlowLog', {
+      DestinationOptions: Match.absent(),
+    });
+    Template.fromStack(stack).hasResourceProperties('AWS::EC2::FlowLog', {
+      LogDestinationType: 'kinesis-data-firehose',
+    });
+    Template.fromStack(stack).resourceCountIs('AWS::Logs::LogGroup', 0);
+    Template.fromStack(stack).resourceCountIs('AWS::S3::Bucket', 0);
+  });
+
+  test('with flowLogName, adds Name tag with the name', () => {
+    const stack = getTestStack();
+
+    new FlowLog(stack, 'FlowLogs', {
+      resourceType: FlowLogResourceType.fromNetworkInterfaceId('eni-123455'),
+      flowLogName: 'CustomFlowLogName',
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::EC2::FlowLog', {
+      Tags: [
+        {
+          Key: 'Name',
+          Value: 'CustomFlowLogName',
+        },
+      ],
+    });
   });
 
   test('allows setting destination options', () => {
@@ -395,7 +436,6 @@ describe('vpc flow logs', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::S3::Bucket', {
       BucketName: 'testbucket',
     });
-
   });
   test('with s3 as the destination and all the defaults set, it successfully creates all the resources', () => {
     const stack = getTestStack();
@@ -416,7 +456,6 @@ describe('vpc flow logs', () => {
     Template.fromStack(stack).resourceCountIs('AWS::Logs::LogGroup', 0);
     Template.fromStack(stack).resourceCountIs('AWS::IAM::Role', 0);
     Template.fromStack(stack).resourceCountIs('AWS::S3::Bucket', 1);
-
   });
   test('create with vpc', () => {
     const stack = getTestStack();
@@ -441,7 +480,6 @@ describe('vpc flow logs', () => {
         Ref: 'VPCflowLogsLogGroupE900F980',
       },
     });
-
   });
   test('add to vpc', () => {
     const stack = getTestStack();
@@ -496,6 +534,88 @@ describe('vpc flow logs', () => {
       },
       MaxAggregationInterval: 60,
     });
+  });
+
+  test('create from transit gateway`', () => {
+    const stack = getTestStack();
+
+    new FlowLog(stack, 'FlowLogs', {
+      resourceType: FlowLogResourceType.fromTransitGatewayId('tgw-123456'),
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::EC2::FlowLog', {
+      ResourceType: 'TransitGateway',
+      ResourceId: 'tgw-123456',
+      DeliverLogsPermissionArn: {
+        'Fn::GetAtt': ['FlowLogsIAMRoleF18F4209', 'Arn'],
+      },
+      LogGroupName: {
+        Ref: 'FlowLogsLogGroup9853A85F',
+      },
+    });
+  });
+
+  test('throw if transit gateway with traffic type', () => {
+    const stack = getTestStack();
+
+    expect(() => {
+      new FlowLog(stack, 'FlowLogs', {
+        resourceType: FlowLogResourceType.fromTransitGatewayId('tgw-123456'),
+        trafficType: FlowLogTrafficType.REJECT,
+      });
+    }).toThrow(/trafficType is not supported for Transit Gateway and Transit Gateway Attachment/);
+  });
+
+  test('create from transit gateway attachment', () => {
+    const stack = getTestStack();
+
+    new FlowLog(stack, 'FlowLogs', {
+      resourceType: FlowLogResourceType.fromTransitGatewayAttachmentId('tgw-attach-123456'),
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::EC2::FlowLog', {
+      ResourceType: 'TransitGatewayAttachment',
+      ResourceId: 'tgw-attach-123456',
+      DeliverLogsPermissionArn: {
+        'Fn::GetAtt': ['FlowLogsIAMRoleF18F4209', 'Arn'],
+      },
+      LogGroupName: {
+        Ref: 'FlowLogsLogGroup9853A85F',
+      },
+    });
+  });
+
+  test('throw if transit gateway attachment with traffic type', () => {
+    const stack = getTestStack();
+
+    expect(() => {
+      new FlowLog(stack, 'FlowLogs', {
+        resourceType: FlowLogResourceType.fromTransitGatewayAttachmentId('tgw-attach-123456'),
+        trafficType: FlowLogTrafficType.REJECT,
+      });
+    }).toThrow(/trafficType is not supported for Transit Gateway and Transit Gateway Attachment/);
+  });
+
+  test('throw if transit gateway with value other than maxAggregationInterval.ONE_MINUTES', () => {
+    const stack = getTestStack();
+
+    expect(() => {
+      new FlowLog(stack, 'FlowLogs', {
+        resourceType: FlowLogResourceType.fromTransitGatewayId('tgw-123456'),
+        maxAggregationInterval: FlowLogMaxAggregationInterval.TEN_MINUTES,
+      });
+    }).toThrow(/maxAggregationInterval must be set to ONE_MINUTE for Transit Gateway and Transit Gateway Attachment/);
+  });
+
+  test('throw if transit gateway attachment with maxAggregationInterval value other than maxAggregationInterval.ONE_MINUTES', () => {
+    const stack = getTestStack();
+
+    expect(() => {
+      new FlowLog(stack, 'FlowLogs', {
+        resourceType: FlowLogResourceType.fromTransitGatewayAttachmentId('tgw-attach-123456'),
+        maxAggregationInterval: FlowLogMaxAggregationInterval.TEN_MINUTES,
+      });
+    }).toThrow(/maxAggregationInterval must be set to ONE_MINUTE for Transit Gateway and Transit Gateway Attachment/);
   });
 });
 
@@ -585,6 +705,16 @@ test('log format for built-in types is correct', () => {
       LogFormat.PKT_DST_AWS_SERVICE,
       LogFormat.FLOW_DIRECTION,
       LogFormat.TRAFFIC_PATH,
+      LogFormat.ECS_CLUSTER_ARN,
+      LogFormat.ECS_CLUSTER_NAME,
+      LogFormat.ECS_CONTAINER_INSTANCE_ARN,
+      LogFormat.ECS_CONTAINER_INSTANCE_ID,
+      LogFormat.ECS_CONTAINER_ID,
+      LogFormat.ECS_SECOND_CONTAINER_ID,
+      LogFormat.ECS_SERVICE_NAME,
+      LogFormat.ECS_TASK_DEFINITION_ARN,
+      LogFormat.ECS_TASK_ARN,
+      LogFormat.ECS_TASK_ID,
     ],
   });
 
@@ -595,7 +725,10 @@ test('log format for built-in types is correct', () => {
                 + '${dstport} ${protocol} ${packets} ${bytes} ${start} ${end} ${action} ${log-status} '
                 + '${vpc-id} ${subnet-id} ${instance-id} ${tcp-flags} ${type} ${pkt-srcaddr} '
                 + '${pkt-dstaddr} ${region} ${az-id} ${sublocation-type} ${sublocation-id} '
-                + '${pkt-src-aws-service} ${pkt-dst-aws-service} ${flow-direction} ${traffic-path}'),
+                + '${pkt-src-aws-service} ${pkt-dst-aws-service} ${flow-direction} ${traffic-path} '
+                + '${ecs-cluster-arn} ${ecs-cluster-name} ${ecs-container-instance-arn} ${ecs-container-instance-id} '
+                + '${ecs-container-id} ${ecs-second-container-id} ${ecs-service-name} ${ecs-task-definition-arn} '
+                + '${ecs-task-arn} ${ecs-task-id}'),
   });
 });
 
@@ -618,7 +751,6 @@ test('with custom log format set empty, it not creates with cloudwatch log desti
       Ref: 'FlowLogsLogGroup9853A85F',
     },
   });
-
 });
 
 function getTestStack(): Stack {
@@ -676,3 +808,4 @@ test('with custom log format set custom, it not creates with cloudwatch log dest
     },
   });
 });
+

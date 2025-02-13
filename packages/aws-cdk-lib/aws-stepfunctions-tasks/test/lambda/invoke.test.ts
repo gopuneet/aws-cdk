@@ -7,7 +7,6 @@ import { LambdaInvocationType, LambdaInvoke } from '../../lib';
 /* eslint-disable quote-props */
 
 describe('LambdaInvoke', () => {
-
   let stack: Stack;
   let lambdaFunction: lambda.Function;
 
@@ -17,7 +16,7 @@ describe('LambdaInvoke', () => {
     lambdaFunction = new lambda.Function(stack, 'Fn', {
       code: lambda.Code.fromInline('foo'),
       handler: 'handler',
-      runtime: lambda.Runtime.NODEJS_14_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
     });
   });
 
@@ -55,6 +54,55 @@ describe('LambdaInvoke', () => {
       Retry: [
         {
           ErrorEquals: [
+            'Lambda.ClientExecutionTimeoutException',
+            'Lambda.ServiceException',
+            'Lambda.AWSLambdaException',
+            'Lambda.SdkClientException',
+          ],
+          IntervalSeconds: 2,
+          MaxAttempts: 6,
+          BackoffRate: 2,
+        },
+      ],
+    });
+  });
+
+  test('default settings - using JSONata', () => {
+  // WHEN
+    const task = LambdaInvoke.jsonata(stack, 'Task', {
+      lambdaFunction,
+    });
+
+    // THEN
+    expect(stack.resolve(task.toStateJson())).toEqual({
+      End: true,
+      Type: 'Task',
+      QueryLanguage: 'JSONata',
+      Resource: {
+        'Fn::Join': [
+          '',
+          [
+            'arn:',
+            {
+              Ref: 'AWS::Partition',
+            },
+            ':states:::lambda:invoke',
+          ],
+        ],
+      },
+      Arguments: {
+        FunctionName: {
+          'Fn::GetAtt': [
+            'Fn9270CBC0',
+            'Arn',
+          ],
+        },
+        'Payload': '{% $states.input %}',
+      },
+      Retry: [
+        {
+          ErrorEquals: [
+            'Lambda.ClientExecutionTimeoutException',
             'Lambda.ServiceException',
             'Lambda.AWSLambdaException',
             'Lambda.SdkClientException',
@@ -152,6 +200,7 @@ describe('LambdaInvoke', () => {
       Retry: [
         {
           ErrorEquals: [
+            'Lambda.ClientExecutionTimeoutException',
             'Lambda.ServiceException',
             'Lambda.AWSLambdaException',
             'Lambda.SdkClientException',

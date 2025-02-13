@@ -3,6 +3,7 @@ import { IKey } from './key';
 import { CfnAlias } from './kms.generated';
 import * as iam from '../../aws-iam';
 import { FeatureFlags, RemovalPolicy, Resource, Stack, Token, Tokenization } from '../../core';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
 import { KMS_ALIAS_NAME_REF } from '../../cx-api';
 
 const REQUIRED_ALIAS_PREFIX = 'alias/';
@@ -59,7 +60,26 @@ abstract class AliasBase extends Resource implements IAlias {
 
   public abstract readonly aliasTargetKey: IKey;
 
+  /**
+   * The ARN of the alias.
+   *
+   * @attribute
+   * @deprecated use `aliasArn` instead
+   */
   public get keyArn(): string {
+    return Stack.of(this).formatArn({
+      service: 'kms',
+      // aliasName already contains the '/'
+      resource: this.aliasName,
+    });
+  }
+
+  /**
+   * The ARN of the alias.
+   *
+   * @attribute
+   */
+  public get aliasArn(): string {
     return Stack.of(this).formatArn({
       service: 'kms',
       // aliasName already contains the '/'
@@ -93,6 +113,18 @@ abstract class AliasBase extends Resource implements IAlias {
 
   public grantEncryptDecrypt(grantee: iam.IGrantable): iam.Grant {
     return this.aliasTargetKey.grantEncryptDecrypt(grantee);
+  }
+
+  public grantSign(grantee: iam.IGrantable): iam.Grant {
+    return this.aliasTargetKey.grantSign(grantee);
+  }
+
+  public grantVerify(grantee: iam.IGrantable): iam.Grant {
+    return this.aliasTargetKey.grantVerify(grantee);
+  }
+
+  public grantSignVerify(grantee: iam.IGrantable): iam.Grant {
+    return this.aliasTargetKey.grantSignVerify(grantee);
   }
 
   grantGenerateMac(grantee: iam.IGrantable): iam.Grant {
@@ -169,6 +201,9 @@ export class Alias extends AliasBase {
       public grantDecrypt(grantee: iam.IGrantable): iam.Grant { return iam.Grant.drop(grantee, ''); }
       public grantEncrypt(grantee: iam.IGrantable): iam.Grant { return iam.Grant.drop(grantee, ''); }
       public grantEncryptDecrypt(grantee: iam.IGrantable): iam.Grant { return iam.Grant.drop(grantee, ''); }
+      public grantSign(grantee: iam.IGrantable): iam.Grant { return iam.Grant.drop(grantee, ''); }
+      public grantVerify(grantee: iam.IGrantable): iam.Grant { return iam.Grant.drop(grantee, ''); }
+      public grantSignVerify(grantee: iam.IGrantable): iam.Grant { return iam.Grant.drop(grantee, ''); }
       public grantGenerateMac(grantee: iam.IGrantable): iam.Grant { return iam.Grant.drop(grantee, ''); }
       public grantVerifyMac(grantee: iam.IGrantable): iam.Grant { return iam.Grant.drop(grantee, ''); }
     }
@@ -217,6 +252,8 @@ export class Alias extends AliasBase {
     super(scope, id, {
       physicalName: aliasName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.aliasTargetKey = props.targetKey;
 

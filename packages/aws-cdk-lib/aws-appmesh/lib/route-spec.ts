@@ -24,6 +24,13 @@ export interface WeightedTarget {
    * @default 1
    */
   readonly weight?: number;
+
+  /**
+   * The port to match from the request.
+   *
+   * @default - do not match on port
+   */
+  readonly port?: number;
 }
 
 /**
@@ -442,7 +449,7 @@ class HttpRouteSpec extends RouteSpec {
       const tcpRetryEvents = props.retryPolicy.tcpRetryEvents ?? [];
 
       if (httpRetryEvents.length + tcpRetryEvents.length === 0) {
-        throw new Error('You must specify one value for at least one of `httpRetryEvents` or `tcpRetryEvents`');
+        throw new cdk.UnscopedValidationError('You must specify one value for at least one of `httpRetryEvents` or `tcpRetryEvents`');
       }
 
       this.retryPolicy = {
@@ -460,7 +467,7 @@ class HttpRouteSpec extends RouteSpec {
     const headers = this.match?.headers;
     const queryParameters = this.match?.queryParameters;
 
-    validateHttpMatchArrayLength(headers, queryParameters);
+    validateHttpMatchArrayLength(scope, headers, queryParameters);
 
     const httpConfig: CfnRoute.HttpRouteProperty = {
       action: {
@@ -550,7 +557,7 @@ class GrpcRouteSpec extends RouteSpec {
       const tcpRetryEvents = props.retryPolicy.tcpRetryEvents ?? [];
 
       if (grpcRetryEvents.length + httpRetryEvents.length + tcpRetryEvents.length === 0) {
-        throw new Error('You must specify one value for at least one of `grpcRetryEvents`, `httpRetryEvents` or `tcpRetryEvents`');
+        throw new cdk.UnscopedValidationError('You must specify one value for at least one of `grpcRetryEvents`, `httpRetryEvents` or `tcpRetryEvents`');
       }
 
       this.retryPolicy = {
@@ -568,11 +575,11 @@ class GrpcRouteSpec extends RouteSpec {
     const metadata = this.match.metadata;
     const port = this.match.port;
 
-    validateGrpcRouteMatch(this.match);
-    validateGrpcMatchArrayLength(metadata);
+    validateGrpcRouteMatch(scope, this.match);
+    validateGrpcMatchArrayLength(scope, metadata);
 
     if (methodName && !serviceName) {
-      throw new Error('If you specify a method name, you must also specify a service name');
+      throw new cdk.ValidationError('If you specify a method name, you must also specify a service name', scope);
     }
 
     return {
@@ -603,6 +610,7 @@ function renderWeightedTargets(weightedTargets: WeightedTarget[]): CfnRoute.Weig
     renderedTargets.push({
       virtualNode: t.virtualNode.virtualNodeName,
       weight: t.weight == undefined ? 1 : t.weight,
+      port: t.port,
     });
   }
   return renderedTargets;

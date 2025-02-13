@@ -31,6 +31,13 @@ export interface IntegTestInfo {
    * @default - test run command will be `node {filePath}`
    */
   readonly appCommand?: string;
+
+  /**
+   * true if this test is running in watch mode
+   *
+   * @default false
+   */
+  readonly watch?: boolean;
 }
 
 /**
@@ -102,7 +109,8 @@ export class IntegTest {
 
     const parsed = path.parse(this.fileName);
     this.discoveryRelativeFileName = path.relative(info.discoveryRoot, info.fileName);
-    this.directory = parsed.dir;
+    // if `--watch` then we need the directory to be the cwd
+    this.directory = info.watch ? process.cwd() : parsed.dir;
 
     // if we are running in a package directory then just use the fileName
     // as the testname, but if we are running in a parent directory with
@@ -115,8 +123,8 @@ export class IntegTest {
       : path.join(path.relative(this.info.discoveryRoot, parsed.dir), parsed.name);
 
     this.normalizedTestName = parsed.name;
-    this.snapshotDir = path.join(this.directory, `${parsed.base}.snapshot`);
-    this.temporaryOutputDir = path.join(this.directory, `${CDK_OUTDIR_PREFIX}.${parsed.base}.snapshot`);
+    this.snapshotDir = path.join(parsed.dir, `${parsed.base}.snapshot`);
+    this.temporaryOutputDir = path.join(parsed.dir, `${CDK_OUTDIR_PREFIX}.${parsed.base}.snapshot`);
   }
 
   /**
@@ -152,10 +160,10 @@ export interface IntegrationTestsDiscoveryOptions {
   readonly exclude?: boolean;
 
   /**
-    * List of tests to include (or exclude if `exclude=true`)
-    *
-    * @default - all matched files
-    */
+   * List of tests to include (or exclude if `exclude=true`)
+   *
+   * @default - all matched files
+   */
   readonly tests?: string[];
 
   /**
@@ -165,8 +173,8 @@ export interface IntegrationTestsDiscoveryOptions {
    * If the app command contains {filePath}, the test file names will be substituted at that place in the command for each run.
    */
   readonly testCases: {
-    [app: string]: string[]
-  }
+    [app: string]: string[];
+  };
 }
 
 /**
@@ -191,10 +199,10 @@ export class IntegrationTests {
    */
   public async fromCliOptions(options: {
     app?: string;
-    exclude?: boolean,
-    language?: string[],
-    testRegex?: string[],
-    tests?: string[],
+    exclude?: boolean;
+    language?: string[];
+    testRegex?: string[];
+    tests?: string[];
   }): Promise<IntegTest[]> {
     const baseOptions = {
       tests: options.tests,
@@ -245,7 +253,7 @@ export class IntegrationTests {
    */
   private getLanguagePreset(language: string) {
     const languagePresets: {
-      [language: string]: [string, string[]]
+      [language: string]: [string, string[]];
     } = {
       javascript: ['node {filePath}', ['^integ\\..*\\.js$']],
       typescript: ['node -r ts-node/register {filePath}', ['^integ\\.(?!.*\\.d\\.ts$).*\\.ts$']],

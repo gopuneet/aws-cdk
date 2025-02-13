@@ -28,7 +28,7 @@ export enum IpPreference {
    * Use IPv6 when sending traffic to a local application.
    * First attempt to use IPv6 and fall back to IPv4 for service discovery.
    */
-  IPV6_PREFERRED = 'IPv6_PREFERRED'
+  IPV6_PREFERRED = 'IPv6_PREFERRED',
 }
 
 /**
@@ -91,7 +91,6 @@ export abstract class ServiceDiscovery {
   /**
    * Returns DNS based service discovery
    *
-   * @param hostname
    * @param responseType Specifies the DNS response type for the virtual node.
    *  The default is `DnsResponseType.LOAD_BALANCER`.
    * @param ipPreference No IP preference is applied to the Virtual Node.

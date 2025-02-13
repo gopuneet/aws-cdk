@@ -18,7 +18,6 @@ describe('fargate task definition', () => {
         Cpu: '256',
         Memory: '512',
       });
-
     });
 
     test('support lazy cpu and memory values', () => {
@@ -35,7 +34,6 @@ describe('fargate task definition', () => {
         Cpu: '128',
         Memory: '1024',
       });
-
     });
 
     test('with all properties set', () => {
@@ -60,6 +58,7 @@ describe('fargate task definition', () => {
           cpuArchitecture: ecs.CpuArchitecture.X86_64,
           operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
         },
+        pidMode: ecs.PidMode.TASK,
       });
 
       taskDefinition.addVolume({
@@ -84,6 +83,7 @@ describe('fargate task definition', () => {
         Family: 'myApp',
         Memory: '1024',
         NetworkMode: 'awsvpc',
+        PidMode: 'task',
         RequiresCompatibilities: [
           ecs.LaunchType.FARGATE,
         ],
@@ -106,7 +106,6 @@ describe('fargate task definition', () => {
           },
         ],
       });
-
     });
 
     test('throws when adding placement constraint', () => {
@@ -118,7 +117,6 @@ describe('fargate task definition', () => {
       expect(() => {
         taskDefinition.addPlacementConstraint(ecs.PlacementConstraint.memberOf('attribute:ecs.instance-type =~ t2.*'));
       }).toThrow(/Cannot set placement constraints on tasks that run on Fargate/);
-
     });
 
     test('throws when adding inference accelerators', () => {
@@ -135,7 +133,6 @@ describe('fargate task definition', () => {
       expect(() => {
         taskDefinition.addInferenceAccelerator(inferenceAccelerator);
       }).toThrow(/Cannot use inference accelerators on tasks that run on Fargate/);
-
     });
 
     test('throws when ephemeral storage request is too high', () => {
@@ -161,6 +158,98 @@ describe('fargate task definition', () => {
 
       // THEN
     });
+
+    test('throws when pidMode is specified without an operating system family', () => {
+      // GIVEN
+      const stack = new cdk.Stack();
+
+      // WHEN
+      // THEN
+      expect(() => {
+        new ecs.FargateTaskDefinition(stack, 'FargateTaskDef', {
+          pidMode: ecs.PidMode.TASK,
+          runtimePlatform: {
+            cpuArchitecture: ecs.CpuArchitecture.X86_64,
+          },
+          cpu: 1024,
+          memoryLimitMiB: 2048,
+        });
+      }).toThrow(/Specifying 'pidMode' requires that operating system family also be provided./);
+    });
+
+    test('throws when pidMode is specified on Windows', () => {
+      // GIVEN
+      const stack = new cdk.Stack();
+
+      // WHEN
+      // THEN
+      expect(() => {
+        new ecs.FargateTaskDefinition(stack, 'FargateTaskDef', {
+          pidMode: ecs.PidMode.TASK,
+          runtimePlatform: {
+            operatingSystemFamily: ecs.OperatingSystemFamily.WINDOWS_SERVER_2019_CORE,
+            cpuArchitecture: ecs.CpuArchitecture.X86_64,
+          },
+          cpu: 1024,
+          memoryLimitMiB: 2048,
+        });
+      }).toThrow(/'pidMode' is not supported for Windows containers./);
+    });
+
+    test('throws when pidMode is not task', () => {
+      // GIVEN
+      const stack = new cdk.Stack();
+
+      // WHEN
+      // THEN
+      expect(() => {
+        new ecs.FargateTaskDefinition(stack, 'FargateTaskDef', {
+          pidMode: ecs.PidMode.HOST,
+          runtimePlatform: {
+            operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
+          },
+        });
+      }).toThrow(/'pidMode' can only be set to 'task' for Linux Fargate containers, got: 'host'./);
+    });
+  });
+  describe('When configuredAtLaunch in the Volume', ()=> {
+    test('do not throw when configuredAtLaunch is false', () => {
+      // GIVEN
+      const stack = new cdk.Stack();
+
+      // THEN
+      expect(() => {
+        const taskDefinition =new ecs.FargateTaskDefinition(stack, 'FargateTaskDef');
+        taskDefinition.addVolume({
+          name: 'nginx-vol',
+          efsVolumeConfiguration: {
+            fileSystemId: 'fs-1234',
+          },
+        });
+        taskDefinition.addVolume({
+          name: 'nginx-vol1',
+          efsVolumeConfiguration: {
+            fileSystemId: 'fs-456',
+          },
+        });
+      });
+    });
+    test('throws when other volume configuration set with configuredAtLaunch', () => {
+      // GIVEN
+      const stack = new cdk.Stack();
+
+      // THEN
+      expect(() => {
+        const taskDefinition =new ecs.FargateTaskDefinition(stack, 'FargateTaskDef');
+        taskDefinition.addVolume({
+          name: 'nginx-vol',
+          configuredAtLaunch: true,
+          efsVolumeConfiguration: {
+            fileSystemId: 'fs-1234',
+          },
+        });
+      }).toThrow(/Volume Configurations must not be specified for 'nginx-vol' when 'configuredAtLaunch' is set to true/);
+    });
   });
 
   describe('When importing from an existing Fargate TaskDefinition', () => {
@@ -174,7 +263,6 @@ describe('fargate task definition', () => {
 
       // THEN
       expect(taskDefinition.taskDefinitionArn).toEqual(expectTaskDefinitionArn);
-
     });
 
     test('can succeed using attributes', () => {
@@ -205,7 +293,6 @@ describe('fargate task definition', () => {
       expect(taskDefinition.networkMode).toEqual(expectNetworkMode);
       expect(taskDefinition.taskRole).toEqual(expectTaskRole);
       expect(taskDefinition.executionRole).toEqual(expectExecutionRole);
-
     });
 
     test('returns a Fargate TaskDefinition that will throw an error when trying to access its networkMode but its networkMode is undefined', () => {
@@ -227,7 +314,6 @@ describe('fargate task definition', () => {
         taskDefinition.networkMode;
       }).toThrow('This operation requires the networkMode in ImportedTaskDefinition to be defined. ' +
         'Add the \'networkMode\' in ImportedTaskDefinitionProps to instantiate ImportedTaskDefinition');
-
     });
 
     test('returns a Fargate TaskDefinition that will throw an error when trying to access its taskRole but its taskRole is undefined', () => {
@@ -351,7 +437,7 @@ describe('fargate task definition', () => {
             operatingSystemFamily: ecs.OperatingSystemFamily.WINDOWS_SERVER_2019_CORE,
           },
         });
-      }).toThrowError(`If operatingSystemFamily is ${ecs.OperatingSystemFamily.WINDOWS_SERVER_2019_CORE._operatingSystemFamily}, then cpu must be in 1024 (1 vCPU), 2048 (2 vCPU), or 4096 (4 vCPU).`);
+      }).toThrow(`If operatingSystemFamily is ${ecs.OperatingSystemFamily.WINDOWS_SERVER_2019_CORE._operatingSystemFamily}, then cpu must be in 1024 (1 vCPU), 2048 (2 vCPU), or 4096 (4 vCPU).`);
 
       // Memory is not in 1 GB increments.
       expect(() => {
@@ -363,7 +449,7 @@ describe('fargate task definition', () => {
             operatingSystemFamily: ecs.OperatingSystemFamily.WINDOWS_SERVER_2019_CORE,
           },
         });
-      }).toThrowError('If provided cpu is 1024, then memoryMiB must have a min of 1024 and a max of 8192, in 1024 increments. Provided memoryMiB was 1025.');
+      }).toThrow('If provided cpu is 1024, then memoryMiB must have a min of 1024 and a max of 8192, in 1024 increments. Provided memoryMiB was 1025.');
 
       // Check runtimePlatform was been defined ,but not undefined cpu and memoryLimitMiB.
       expect(() => {
@@ -373,9 +459,7 @@ describe('fargate task definition', () => {
             operatingSystemFamily: ecs.OperatingSystemFamily.WINDOWS_SERVER_2004_CORE,
           },
         });
-      }).toThrowError('If operatingSystemFamily is WINDOWS_SERVER_2004_CORE, then cpu must be in 1024 (1 vCPU), 2048 (2 vCPU), or 4096 (4 vCPU). Provided value was: 256');
-
+      }).toThrow('If operatingSystemFamily is WINDOWS_SERVER_2004_CORE, then cpu must be in 1024 (1 vCPU), 2048 (2 vCPU), or 4096 (4 vCPU). Provided value was: 256');
     });
-
   });
 });

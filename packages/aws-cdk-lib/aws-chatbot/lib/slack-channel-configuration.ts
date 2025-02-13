@@ -6,6 +6,7 @@ import * as iam from '../../aws-iam';
 import * as logs from '../../aws-logs';
 import * as sns from '../../aws-sns';
 import * as cdk from '../../core';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
 
 /**
  * Properties for a new Slack channel configuration
@@ -87,6 +88,13 @@ export interface SlackChannelConfigurationProps {
    * @default - The AWS managed 'AdministratorAccess' policy is applied as a default if this is not set.
    */
   readonly guardrailPolicies?: iam.IManagedPolicy[];
+
+  /**
+   * Enables use of a user role requirement in your chat configuration.
+   *
+   * @default false
+   */
+  readonly userRoleRequired?: boolean;
 }
 
 /**
@@ -160,7 +168,6 @@ abstract class SlackChannelConfigurationBase extends cdk.Resource implements ISl
 
   /**
    * Adds extra permission to iam-role of Slack channel configuration
-   * @param statement
    */
   public addToRolePolicy(statement: iam.PolicyStatement): void {
     if (!this.role) {
@@ -199,7 +206,6 @@ abstract class SlackChannelConfigurationBase extends cdk.Resource implements ISl
  * A new Slack channel configuration
  */
 export class SlackChannelConfiguration extends SlackChannelConfigurationBase {
-
   /**
    * Import an existing Slack channel configuration provided an ARN
    * @param scope The parent creating construct
@@ -217,7 +223,6 @@ export class SlackChannelConfiguration extends SlackChannelConfigurationBase {
     }
 
     class Import extends SlackChannelConfigurationBase {
-
       /**
        * @attribute
        */
@@ -283,6 +288,8 @@ export class SlackChannelConfiguration extends SlackChannelConfigurationBase {
     super(scope, id, {
       physicalName: props.slackChannelConfigurationName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.role = props.role || new iam.Role(this, 'ConfigurationRole', {
       assumedBy: new iam.ServicePrincipal('chatbot.amazonaws.com'),
@@ -300,6 +307,7 @@ export class SlackChannelConfiguration extends SlackChannelConfigurationBase {
       snsTopicArns: cdk.Lazy.list({ produce: () => this.notificationTopics.map(topic => topic.topicArn) }, { omitEmpty: true } ),
       loggingLevel: props.loggingLevel?.toString(),
       guardrailPolicies: cdk.Lazy.list({ produce: () => props.guardrailPolicies?.map(policy => policy.managedPolicyArn) }, { omitEmpty: true } ),
+      userRoleRequired: props.userRoleRequired,
     });
 
     // Log retention
@@ -320,8 +328,8 @@ export class SlackChannelConfiguration extends SlackChannelConfigurationBase {
 
   /**
    * Adds a SNS topic that deliver notifications to AWS Chatbot.
-   * @param notificationTopic
    */
+  @MethodMetadata()
   public addNotificationTopic(notificationTopic: sns.ITopic): void {
     this.notificationTopics.push(notificationTopic);
   }

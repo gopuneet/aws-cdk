@@ -1,5 +1,7 @@
 import { IStage } from './stage';
+import * as firehose from '../../aws-kinesisfirehose';
 import { ILogGroup } from '../../aws-logs';
+import { ValidationError } from '../../core/lib/errors';
 
 /**
  * Access log destination for a RestApi Stage.
@@ -8,7 +10,7 @@ export interface IAccessLogDestination {
   /**
    * Binds this destination to the RestApi Stage.
    */
-  bind(stage: IStage): AccessLogDestinationConfig
+  bind(stage: IStage): AccessLogDestinationConfig;
 }
 
 /**
@@ -34,6 +36,26 @@ export class LogGroupLogDestination implements IAccessLogDestination {
   public bind(_stage: IStage): AccessLogDestinationConfig {
     return {
       destinationArn: this.logGroup.logGroupArn,
+    };
+  }
+}
+
+/**
+ * Use a Firehose delivery stream as a custom access log destination for API Gateway.
+ */
+export class FirehoseLogDestination implements IAccessLogDestination {
+  constructor(private readonly stream: firehose.CfnDeliveryStream) {
+  }
+
+  /**
+   * Binds this destination to the Firehose delivery stream.
+   */
+  public bind(stage: IStage): AccessLogDestinationConfig {
+    if (!this.stream.deliveryStreamName?.startsWith('amazon-apigateway-')) {
+      throw new ValidationError(`Firehose delivery stream name for access log destination must begin with 'amazon-apigateway-', got '${this.stream.deliveryStreamName}'`, stage);
+    }
+    return {
+      destinationArn: this.stream.attrArn,
     };
   }
 }
@@ -353,8 +375,6 @@ export class AccessLogField {
    * The request header override.
    * If this parameter is defined, it contains the headers to be used instead of the HTTP Headers that are defined in the Integration Request pane.
    * @see https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-override-request-response-parameters.html
-   *
-   * @param headerName
    */
   public static contextRequestOverrideHeader(headerName: string) {
     return `$context.requestOverride.header.${headerName}`;
@@ -364,8 +384,6 @@ export class AccessLogField {
    * The request path override. If this parameter is defined,
    * it contains the request path to be used instead of the URL Path Parameters that are defined in the Integration Request pane.
    * @see https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-override-request-response-parameters.html
-   *
-   * @param pathName
    */
   public static contextRequestOverridePath(pathName: string) {
     return `$context.requestOverride.path.${pathName}`;
@@ -375,8 +393,6 @@ export class AccessLogField {
    * The request query string override.
    * If this parameter is defined, it contains the request query strings to be used instead
    * of the URL Query String Parameters that are defined in the Integration Request pane.
-   *
-   * @param querystringName
    */
   public static contextRequestOverrideQuerystring(querystringName: string) {
     return `$context.requestOverride.querystring.${querystringName}`;
@@ -387,8 +403,6 @@ export class AccessLogField {
    * If this parameter is defined, it contains the header to be returned instead of the Response header
    * that is defined as the Default mapping in the Integration Response pane.
    * @see https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-override-request-response-parameters.html
-   *
-   * @param headerName
    */
   public static contextResponseOverrideHeader(headerName: string) {
     return `$context.responseOverride.header.${headerName}`;
@@ -633,39 +647,39 @@ export interface JsonWithStandardFieldProps {
   /**
    * If this flag is enabled, the source IP of request will be output to the log
    */
-  readonly ip: boolean,
+  readonly ip: boolean;
   /**
    * If this flag is enabled, the principal identifier of the caller will be output to the log
    */
-  readonly caller: boolean,
+  readonly caller: boolean;
   /**
    * If this flag is enabled, the principal identifier of the user will be output to the log
    */
-  readonly user: boolean,
+  readonly user: boolean;
   /**
    * If this flag is enabled, the CLF-formatted request time((dd/MMM/yyyy:HH:mm:ss +-hhmm) will be output to the log
    */
-  readonly requestTime: boolean,
+  readonly requestTime: boolean;
   /**
    * If this flag is enabled, the http method will be output to the log
    */
-  readonly httpMethod: boolean,
+  readonly httpMethod: boolean;
   /**
    * If this flag is enabled, the path to your resource will be output to the log
    */
-  readonly resourcePath: boolean,
+  readonly resourcePath: boolean;
   /**
    * If this flag is enabled, the method response status will be output to the log
    */
-  readonly status: boolean,
+  readonly status: boolean;
   /**
    * If this flag is enabled, the request protocol will be output to the log
    */
-  readonly protocol: boolean,
+  readonly protocol: boolean;
   /**
    * If this flag is enabled, the response payload length will be output to the log
    */
-  readonly responseLength: boolean
+  readonly responseLength: boolean;
 }
 
 /**
@@ -675,7 +689,6 @@ export class AccessLogFormat {
   /**
    * Custom log format.
    * You can create any log format string. You can easily get the $ context variable by using the methods of AccessLogField.
-   * @param format
    * @example
    *
    *  apigateway.AccessLogFormat.custom(JSON.stringify({

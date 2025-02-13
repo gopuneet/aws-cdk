@@ -183,18 +183,25 @@ function recurseArray(key: string, arr: any[], handlers: FieldHandlers, visited:
   }
 
   return {
-    [key]: arr.map(value => {
-      if ((typeof value === 'string' && jsonPathString(value) !== undefined)
+    [key]: resolveArray(arr, handlers, visited),
+  };
+}
+
+function resolveArray(arr: any[], handlers: FieldHandlers, visited: object[] = []): any[] {
+  return arr.map(value => {
+    if ((typeof value === 'string' && jsonPathString(value) !== undefined)
         || (typeof value === 'number' && jsonPathNumber(value) !== undefined)
         || (isStringArray(value) && jsonPathStringList(value) !== undefined)) {
-        throw new Error('Cannot use JsonPath fields in an array, they must be used in objects');
-      }
-      if (typeof value === 'object' && value !== null) {
-        return recurseObject(value, handlers, visited);
-      }
-      return value;
-    }),
-  };
+      throw new Error('Cannot use JsonPath fields in an array, they must be used in objects');
+    }
+    if (Array.isArray(value)) {
+      return resolveArray(value, handlers, visited);
+    }
+    if (typeof value === 'object' && value !== null) {
+      return recurseObject(value, handlers, visited);
+    }
+    return value;
+  });
 }
 
 function isStringArray(x: any): x is string[] {
@@ -333,13 +340,13 @@ export function renderInExpression(x: any) {
 function singleQuotestring(x: string) {
   const ret = new Array<string>();
   ret.push("'");
-  for (const c of x) {
+  for (let i = 0; i < x.length; i++) {
+    const c = x[i];
     if (c === "'") {
       ret.push("\\'");
-    } else if (c === '\\') {
+    } else if (c === '\\' && (i == x.length - 1 || (x[i+1] != '{' && x[i+1] != '}'))) {
+      // Escape backslash, but only if it doesn't immediately precede a curly brace
       ret.push('\\\\');
-    } else if (c === '\n') {
-      ret.push('\\n');
     } else {
       ret.push(c);
     }

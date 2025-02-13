@@ -4,6 +4,7 @@ import { AdjustmentType, MetricAggregationType, StepScalingAction } from './step
 import { findAlarmThresholds, normalizeIntervals } from '../../aws-autoscaling-common';
 import * as cloudwatch from '../../aws-cloudwatch';
 import * as cdk from '../../core';
+import { ValidationError } from '../../core/lib/errors';
 
 export interface BasicStepScalingPolicyProps {
   /**
@@ -15,6 +16,8 @@ export interface BasicStepScalingPolicyProps {
    * The intervals for scaling.
    *
    * Maps a range of metric values to a particular scaling behavior.
+   *
+   * Must be between 2 and 40 steps.
    */
   readonly scalingSteps: ScalingInterval[];
 
@@ -70,7 +73,7 @@ export interface BasicStepScalingPolicyProps {
    *
    * Only has meaning if `evaluationPeriods != 1`.
    *
-   * @default `evaluationPeriods`
+   * @default - Same as `evaluationPeriods`
    */
   readonly datapointsToAlarm?: number;
 
@@ -108,11 +111,29 @@ export class StepScalingPolicy extends Construct {
     super(scope, id);
 
     if (props.scalingSteps.length < 2) {
-      throw new Error('You must supply at least 2 intervals for autoscaling');
+      throw new ValidationError('You must supply at least 2 intervals for autoscaling', scope);
     }
 
-    if (props.datapointsToAlarm !== undefined && props.datapointsToAlarm < 1) {
-      throw new RangeError(`datapointsToAlarm cannot be less than 1, got: ${props.datapointsToAlarm}`);
+    if (props.scalingSteps.length > 40) {
+      throw new ValidationError(`'scalingSteps' can have at most 40 steps, got ${props.scalingSteps.length}`, scope);
+    }
+
+    if (props.evaluationPeriods !== undefined && !cdk.Token.isUnresolved(props.evaluationPeriods) && props.evaluationPeriods < 1) {
+      throw new ValidationError(`evaluationPeriods cannot be less than 1, got: ${props.evaluationPeriods}`, scope);
+    }
+    if (props.datapointsToAlarm !== undefined) {
+      if (props.evaluationPeriods === undefined) {
+        throw new ValidationError('evaluationPeriods must be set if datapointsToAlarm is set', scope);
+      }
+      if (!cdk.Token.isUnresolved(props.datapointsToAlarm) && props.datapointsToAlarm < 1) {
+        throw new ValidationError(`datapointsToAlarm cannot be less than 1, got: ${props.datapointsToAlarm}`, scope);
+      }
+      if (!cdk.Token.isUnresolved(props.datapointsToAlarm)
+        && !cdk.Token.isUnresolved(props.evaluationPeriods)
+        && props.evaluationPeriods < props.datapointsToAlarm
+      ) {
+        throw new ValidationError(`datapointsToAlarm must be less than or equal to evaluationPeriods, got datapointsToAlarm: ${props.datapointsToAlarm}, evaluationPeriods: ${props.evaluationPeriods}`, scope);
+      }
     }
 
     const adjustmentType = props.adjustmentType || AdjustmentType.CHANGE_IN_CAPACITY;

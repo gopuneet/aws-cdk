@@ -4,13 +4,7 @@ import * as sfn from '../../../aws-stepfunctions';
 import { Token } from '../../../core';
 import { integrationResourceArn } from '../private/task-utils';
 
-/**
- * Properties for calling an AWS service's API action from your
- * state machine.
- *
- * @see https://docs.aws.amazon.com/step-functions/latest/dg/supported-services-awssdk.html
- */
-export interface CallAwsServiceProps extends sfn.TaskStateBaseProps {
+interface CallAwsServiceOptions {
   /**
    * The AWS service to call.
    *
@@ -67,9 +61,47 @@ export interface CallAwsServiceProps extends sfn.TaskStateBaseProps {
 }
 
 /**
+ * Properties for calling an AWS service's API action using JSONPath from your
+ * state machine.
+ *
+ * @see https://docs.aws.amazon.com/step-functions/latest/dg/supported-services-awssdk.html
+ */
+export interface CallAwsServiceJsonPathProps extends sfn.TaskStateJsonPathBaseProps, CallAwsServiceOptions {}
+
+/**
+ * Properties for calling an AWS service's API action using JSONata from your
+ * state machine.
+ *
+ * @see https://docs.aws.amazon.com/step-functions/latest/dg/supported-services-awssdk.html
+ */
+export interface CallAwsServiceJsonataProps extends sfn.TaskStateJsonataBaseProps, CallAwsServiceOptions {}
+
+/**
+ * Properties for calling an AWS service's API action from your
+ * state machine.
+ *
+ * @see https://docs.aws.amazon.com/step-functions/latest/dg/supported-services-awssdk.html
+ */
+export interface CallAwsServiceProps extends sfn.TaskStateBaseProps, CallAwsServiceOptions {}
+
+/**
  * A StepFunctions task to call an AWS service API
  */
 export class CallAwsService extends sfn.TaskStateBase {
+  /**
+   * A StepFunctions task using JSONPath to call an AWS service API
+   */
+  public static jsonPath(scope: Construct, id: string, props: CallAwsServiceJsonPathProps) {
+    return new CallAwsService(scope, id, props);
+  }
+
+  /**
+   * A StepFunctions task using JSONata to call an AWS service API
+   */
+  public static jsonata(scope: Construct, id: string, props: CallAwsServiceJsonataProps) {
+    return new CallAwsService(scope, id, { ...props, queryLanguage: sfn.QueryLanguage.JSONATA });
+  }
+
   protected readonly taskMetrics?: sfn.TaskMetricsConfig;
   protected readonly taskPolicies?: iam.PolicyStatement[];
 
@@ -79,8 +111,22 @@ export class CallAwsService extends sfn.TaskStateBase {
     if (this.props.integrationPattern === sfn.IntegrationPattern.RUN_JOB) {
       throw new Error('The RUN_JOB integration pattern is not supported for CallAwsService');
     }
+    if (!Token.isUnresolved(this.props.action) && !this.props.action.startsWith(this.props.action[0]?.toLowerCase())) {
+      throw new Error(`action must be camelCase, got: ${this.props.action}`);
+    }
+    if (this.props.parameters) {
+      const invalidKeys = Object.keys(this.props.parameters).filter(key => !key.startsWith(key[0]?.toUpperCase()));
+      if (invalidKeys.length) {
+        throw new Error(`parameter names must be PascalCase, got: ${invalidKeys.join(', ')}`);
+      }
+    }
 
     const iamServiceMap: Record<string, string> = {
+      cloudwatchlogs: 'logs',
+      efs: 'elasticfilesystem',
+      elasticloadbalancingv2: 'elasticloadbalancing',
+      mediapackagevod: 'mediapackage-vod',
+      mwaa: 'airflow',
       sfn: 'states',
     };
     const iamService = iamServiceMap[props.service] ?? props.service;
@@ -99,20 +145,24 @@ export class CallAwsService extends sfn.TaskStateBase {
   /**
    * @internal
    */
-  protected _renderTask(): any {
+  protected _renderTask(topLevelQueryLanguage?: sfn.QueryLanguage): any {
+    const queryLanguage = sfn._getActualQueryLanguage(topLevelQueryLanguage, this.props.queryLanguage);
     let service = this.props.service;
 
     if (!Token.isUnresolved(service)) {
       service = service.toLowerCase();
     }
 
+    // The pattern here is: "arn:aws:states:::aws-sdk:serviceName:apiAction.[serviceIntegrationPattern]"
+    // See here: https://docs.aws.amazon.com/step-functions/latest/dg/supported-services-awssdk.html
+    // This does not change with sdk upgrades, TT:P125388388
     return {
       Resource: integrationResourceArn(
         'aws-sdk',
         `${service}:${this.props.action}`,
         this.props.integrationPattern,
       ),
-      Parameters: sfn.FieldUtils.renderObject(this.props.parameters) ?? {}, // Parameters is required for aws-sdk
+      ...this._renderParametersOrArguments(this.props.parameters ?? {}, queryLanguage), // Parameters is required for aws-sdk
     };
   }
 }

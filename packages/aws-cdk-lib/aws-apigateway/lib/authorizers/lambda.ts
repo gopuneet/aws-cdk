@@ -1,7 +1,10 @@
 import { Construct } from 'constructs';
+import { IdentitySource } from './identity-source';
 import * as iam from '../../../aws-iam';
 import * as lambda from '../../../aws-lambda';
 import { Arn, ArnFormat, Duration, FeatureFlags, Lazy, Names, Stack } from '../../../core';
+import { ValidationError } from '../../../core/lib/errors';
+import { addConstructMetadata } from '../../../core/lib/metadata-resource';
 import { APIGATEWAY_AUTHORIZER_CHANGE_DEPLOYMENT_LOGICAL_ID } from '../../../cx-api';
 import { CfnAuthorizer, CfnAuthorizerProps } from '../apigateway.generated';
 import { Authorizer, IAuthorizer } from '../authorizer';
@@ -32,7 +35,7 @@ export interface LambdaAuthorizerProps {
    * How long APIGateway should cache the results. Max 1 hour.
    * Disable caching by setting this to 0.
    *
-   * @default Duration.minutes(5)
+   * @default - Duration.minutes(5)
    */
   readonly resultsCacheTtl?: Duration;
 
@@ -46,7 +49,6 @@ export interface LambdaAuthorizerProps {
 }
 
 abstract class LambdaAuthorizer extends Authorizer implements IAuthorizer {
-
   /**
    * The id of the authorizer.
    * @attribute
@@ -79,7 +81,7 @@ abstract class LambdaAuthorizer extends Authorizer implements IAuthorizer {
     this.role = props.assumeRole;
 
     if (props.resultsCacheTtl && props.resultsCacheTtl?.toSeconds() > 3600) {
-      throw new Error('Lambda authorizer property \'resultsCacheTtl\' must not be greater than 3600 seconds (1 hour)');
+      throw new ValidationError('Lambda authorizer property \'resultsCacheTtl\' must not be greater than 3600 seconds (1 hour)', scope);
     }
   }
 
@@ -89,7 +91,7 @@ abstract class LambdaAuthorizer extends Authorizer implements IAuthorizer {
    */
   public _attachToApi(restApi: IRestApi) {
     if (this.restApiId && this.restApiId !== restApi.restApiId) {
-      throw new Error('Cannot attach authorizer to two different rest APIs');
+      throw new ValidationError('Cannot attach authorizer to two different rest APIs', this);
     }
 
     this.restApiId = restApi.restApiId;
@@ -122,7 +124,7 @@ abstract class LambdaAuthorizer extends Authorizer implements IAuthorizer {
    */
   protected setupPermissions() {
     if (!this.role) {
-      this.addDefaultPermisionRole();
+      this.addDefaultPermissionRole();
     } else if (iam.Role.isRole(this.role)) {
       this.addLambdaInvokePermission(this.role);
     }
@@ -131,7 +133,7 @@ abstract class LambdaAuthorizer extends Authorizer implements IAuthorizer {
   /**
    * Add Default Permission Role for handler
    */
-  private addDefaultPermisionRole() :void {
+  private addDefaultPermissionRole(): void {
     this.handler.addPermission(`${Names.uniqueId(this)}:Permissions`, {
       principal: new iam.ServicePrincipal('apigateway.amazonaws.com'),
       sourceArn: this.authorizerArn,
@@ -139,9 +141,9 @@ abstract class LambdaAuthorizer extends Authorizer implements IAuthorizer {
   }
 
   /**
-   * Add Lambda Invoke Permission for LambdaAurhorizer's role
+   * Add Lambda Invoke Permission for Lambda Authorizer's role
    */
-  private addLambdaInvokePermission(role: iam.Role) :void {
+  private addLambdaInvokePermission(role: iam.Role): void {
     role.attachInlinePolicy(new iam.Policy(this, 'authorizerInvokePolicy', {
       statements: [
         new iam.PolicyStatement({
@@ -160,7 +162,7 @@ abstract class LambdaAuthorizer extends Authorizer implements IAuthorizer {
     return Lazy.string({
       produce: () => {
         if (!this.restApiId) {
-          throw new Error(`Authorizer (${this.node.path}) must be attached to a RestApi`);
+          throw new ValidationError(`Authorizer (${this.node.path}) must be attached to a RestApi`, this);
         }
         return this.restApiId;
       },
@@ -182,8 +184,9 @@ export interface TokenAuthorizerProps extends LambdaAuthorizerProps {
 
   /**
    * The request header mapping expression for the bearer token. This is typically passed as part of the header, in which case
-   * this should be `method.request.header.Authorizer` where Authorizer is the header containing the bearer token.
-   * @see https://docs.aws.amazon.com/apigateway/api-reference/link-relation/authorizer-create/#identitySource
+   * this should be `method.request.header.Authorizer` where `Authorizer` is the header containing the bearer token.
+   *
+   * @see https://docs.aws.amazon.com/apigateway/latest/api/API_CreateAuthorizer.html#apigw-CreateAuthorizer-request-identitySource
    * @default `IdentitySource.header('Authorization')`
    */
   readonly identitySource?: string;
@@ -197,7 +200,6 @@ export interface TokenAuthorizerProps extends LambdaAuthorizerProps {
  * @resource AWS::ApiGateway::Authorizer
  */
 export class TokenAuthorizer extends LambdaAuthorizer {
-
   public readonly authorizerId: string;
 
   public readonly authorizerArn: string;
@@ -206,6 +208,8 @@ export class TokenAuthorizer extends LambdaAuthorizer {
 
   constructor(scope: Construct, id: string, props: TokenAuthorizerProps) {
     super(scope, id, props);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const restApiId = this.lazyRestApiId();
 
@@ -215,8 +219,8 @@ export class TokenAuthorizer extends LambdaAuthorizer {
       type: 'TOKEN',
       authorizerUri: lambdaAuthorizerArn(props.handler),
       authorizerCredentials: props.assumeRole?.roleArn,
-      authorizerResultTtlInSeconds: props.resultsCacheTtl?.toSeconds(),
-      identitySource: props.identitySource || 'method.request.header.Authorization',
+      authorizerResultTtlInSeconds: props.resultsCacheTtl?.toSeconds() ?? Duration.minutes(5).toSeconds(),
+      identitySource: props.identitySource || IdentitySource.header('Authorization'),
       identityValidationExpression: props.validationRegex,
     };
 
@@ -242,14 +246,14 @@ export interface RequestAuthorizerProps extends LambdaAuthorizerProps {
   /**
    * An array of request header mapping expressions for identities. Supported parameter types are
    * Header, Query String, Stage Variable, and Context. For instance, extracting an authorization
-   * token from a header would use the identity source `IdentitySource.header('Authorizer')`.
+   * token from a header would use the identity source `IdentitySource.header('Authorization')`.
    *
    * Note: API Gateway uses the specified identity sources as the request authorizer caching key. When caching is
    * enabled, API Gateway calls the authorizer's Lambda function only after successfully verifying that all the
    * specified identity sources are present at runtime. If a specified identify source is missing, null, or empty,
    * API Gateway returns a 401 Unauthorized response without calling the authorizer Lambda function.
    *
-   * @see https://docs.aws.amazon.com/apigateway/api-reference/link-relation/authorizer-create/#identitySource
+   * @see https://docs.aws.amazon.com/apigateway/latest/api/API_CreateAuthorizer.html#apigw-CreateAuthorizer-request-identitySource
    */
   readonly identitySources: string[];
 }
@@ -262,7 +266,6 @@ export interface RequestAuthorizerProps extends LambdaAuthorizerProps {
  * @resource AWS::ApiGateway::Authorizer
  */
 export class RequestAuthorizer extends LambdaAuthorizer {
-
   public readonly authorizerId: string;
 
   public readonly authorizerArn: string;
@@ -271,9 +274,11 @@ export class RequestAuthorizer extends LambdaAuthorizer {
 
   constructor(scope: Construct, id: string, props: RequestAuthorizerProps) {
     super(scope, id, props);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     if ((props.resultsCacheTtl === undefined || props.resultsCacheTtl.toSeconds() !== 0) && props.identitySources.length === 0) {
-      throw new Error('At least one Identity Source is required for a REQUEST-based Lambda authorizer if caching is enabled.');
+      throw new ValidationError('At least one Identity Source is required for a REQUEST-based Lambda authorizer if caching is enabled.', scope);
     }
 
     const restApiId = this.lazyRestApiId();
@@ -284,7 +289,7 @@ export class RequestAuthorizer extends LambdaAuthorizer {
       type: 'REQUEST',
       authorizerUri: lambdaAuthorizerArn(props.handler),
       authorizerCredentials: props.assumeRole?.roleArn,
-      authorizerResultTtlInSeconds: props.resultsCacheTtl?.toSeconds(),
+      authorizerResultTtlInSeconds: props.resultsCacheTtl?.toSeconds() ?? Duration.minutes(5).toSeconds(),
       identitySource: props.identitySources.map(is => is.toString()).join(','),
     };
 

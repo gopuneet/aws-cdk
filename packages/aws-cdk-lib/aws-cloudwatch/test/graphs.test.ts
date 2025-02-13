@@ -1,5 +1,24 @@
 import { Duration, Stack } from '../../core';
-import { Alarm, AlarmWidget, Color, GraphWidget, GraphWidgetView, LegendPosition, LogQueryWidget, Metric, Shading, SingleValueWidget, LogQueryVisualizationType, CustomWidget, GaugeWidget } from '../lib';
+import {
+  Alarm,
+  AlarmWidget,
+  Color,
+  CustomWidget,
+  GaugeWidget,
+  GraphWidget,
+  GraphWidgetView,
+  LegendPosition,
+  LogQueryVisualizationType,
+  LogQueryWidget,
+  Metric,
+  Shading,
+  SingleValueWidget,
+  TableLayout,
+  TableSummaryColumn,
+  TableThreshold,
+  TableWidget,
+  VerticalShading,
+} from '../lib';
 
 describe('Graphs', () => {
   test('add stacked property to graphs', () => {
@@ -23,7 +42,6 @@ describe('Graphs', () => {
         yAxis: {},
       },
     }]);
-
   });
 
   test('add metrics to graphs on either axis', () => {
@@ -55,7 +73,6 @@ describe('Graphs', () => {
         yAxis: {},
       },
     }]);
-
   });
 
   test('add metrics to graphs on either axis lazily', () => {
@@ -83,7 +100,6 @@ describe('Graphs', () => {
         yAxis: {},
       },
     }]);
-
   });
 
   test('label and color are respected in constructor', () => {
@@ -107,7 +123,6 @@ describe('Graphs', () => {
         yAxis: {},
       },
     }]);
-
   });
 
   test('bar view', () => {
@@ -130,7 +145,6 @@ describe('Graphs', () => {
         yAxis: {},
       },
     }]);
-
   });
 
   test('singlevalue widget', () => {
@@ -156,7 +170,6 @@ describe('Graphs', () => {
         ],
       },
     }]);
-
   });
 
   test('query result widget', () => {
@@ -184,7 +197,6 @@ describe('Graphs', () => {
         query: `SOURCE '${logGroup.logGroupName}' | fields @message\n| filter @message like /Error/`,
       },
     }]);
-
   });
 
   test('query result widget - bar', () => {
@@ -213,7 +225,6 @@ describe('Graphs', () => {
         query: `SOURCE '${logGroup.logGroupName}' | fields @message\n| filter @message like /Error/`,
       },
     }]);
-
   });
 
   test('query result widget - pie', () => {
@@ -242,7 +253,6 @@ describe('Graphs', () => {
         query: `SOURCE '${logGroup.logGroupName}' | fields @message\n| filter @message like /Error/`,
       },
     }]);
-
   });
 
   test('query result widget - line', () => {
@@ -272,7 +282,6 @@ describe('Graphs', () => {
         query: `SOURCE '${logGroup.logGroupName}' | fields @message\n| filter @message like /Error/`,
       },
     }]);
-
   });
 
   test('query result widget - stackedarea', () => {
@@ -302,7 +311,6 @@ describe('Graphs', () => {
         query: `SOURCE '${logGroup.logGroupName}' | fields @message\n| filter @message like /Error/`,
       },
     }]);
-
   });
 
   test('alarm widget', () => {
@@ -333,7 +341,6 @@ describe('Graphs', () => {
         yAxis: {},
       },
     }]);
-
   });
 
   test('custom widget basic', () => {
@@ -401,7 +408,7 @@ describe('Graphs', () => {
     }]);
   });
 
-  test('add annotations to graph', () => {
+  test('add horizontal annotations to graph', () => {
     // WHEN
     const stack = new Stack();
     const widget = new GraphWidget({
@@ -441,7 +448,65 @@ describe('Graphs', () => {
         yAxis: {},
       },
     }]);
+  });
 
+  test('add vertical annotations to graph', () => {
+    // WHEN
+    const stack = new Stack();
+    const widget = new GraphWidget({
+      title: 'My fancy graph',
+      left: [
+        new Metric({ namespace: 'CDK', metricName: 'Test' }),
+      ],
+      verticalAnnotations: [{
+        date: '2021-07-29T02:31:09.890Z',
+        color: '667788',
+        fill: VerticalShading.AFTER,
+        label: 'this is the annotation',
+      }],
+    });
+
+    // THEN
+    expect(stack.resolve(widget.toJson())).toEqual([{
+      type: 'metric',
+      width: 6,
+      height: 6,
+      properties: {
+        view: 'timeSeries',
+        title: 'My fancy graph',
+        region: { Ref: 'AWS::Region' },
+        metrics: [
+          ['CDK', 'Test'],
+        ],
+        annotations: {
+          vertical: [{
+            value: '2021-07-29T02:31:09.890Z',
+            color: '667788',
+            fill: 'after',
+            label: 'this is the annotation',
+          }],
+        },
+        yAxis: {},
+      },
+    }]);
+  });
+
+  test('vertical annotation date must match ISO 8601', () => {
+    // WHEN
+    expect(() => {
+      new GraphWidget({
+        title: 'My fancy graph',
+        left: [
+          new Metric({ namespace: 'CDK', metricName: 'Test' }),
+        ],
+        verticalAnnotations: [{
+          date: '2021-07-29T02:31:09.890ZZ',
+          color: '667788',
+          fill: VerticalShading.AFTER,
+          label: 'this is the annotation',
+        }],
+      });
+    }).toThrow();
   });
 
   test('convert alarm to annotation', () => {
@@ -483,7 +548,6 @@ describe('Graphs', () => {
         yAxis: {},
       },
     }]);
-
   });
 
   test('add yAxis to graph', () => {
@@ -527,7 +591,6 @@ describe('Graphs', () => {
         },
       },
     }]);
-
   });
 
   test('specify liveData property on graph', () => {
@@ -557,7 +620,6 @@ describe('Graphs', () => {
         yAxis: {},
       },
     }]);
-
   });
 
   test('can use imported alarm with graph', () => {
@@ -572,7 +634,6 @@ describe('Graphs', () => {
     });
 
     // THEN: Compiles
-
   });
 
   test('add setPeriodToTimeRange to singleValueWidget', () => {
@@ -600,7 +661,6 @@ describe('Graphs', () => {
         setPeriodToTimeRange: true,
       },
     }]);
-
   });
 
   test('add sparkline to singleValueWidget', () => {
@@ -628,7 +688,6 @@ describe('Graphs', () => {
         sparkline: true,
       },
     }]);
-
   });
 
   test('throws if setPeriodToTimeRange and sparkline is set on singleValueWidget', () => {
@@ -674,7 +733,33 @@ describe('Graphs', () => {
         singleValueFullPrecision: true,
       },
     }]);
+  });
 
+  test('add period to singleValueWidget', () => {
+    // GIVEN
+    const stack = new Stack();
+    const metric = new Metric({ namespace: 'CDK', metricName: 'Test' });
+
+    // WHEN
+    const widget = new SingleValueWidget({
+      metrics: [metric],
+      period: Duration.days(2),
+    });
+
+    // THEN
+    expect(stack.resolve(widget.toJson())).toEqual([{
+      type: 'metric',
+      width: 6,
+      height: 3,
+      properties: {
+        view: 'singleValue',
+        region: { Ref: 'AWS::Region' },
+        metrics: [
+          ['CDK', 'Test'],
+        ],
+        period: 172800,
+      },
+    }]);
   });
 
   test('allows overriding custom values of dashboard widgets', () => {
@@ -696,7 +781,6 @@ describe('Graphs', () => {
 
     expect(stack.resolve(widget.toJson())[0].properties.metrics[0])
       .toEqual(['CDK', 'Test', { visible: false }]);
-
   });
 
   test('GraphColor is correctly converted into the correct hexcode', () => {
@@ -716,7 +800,6 @@ describe('Graphs', () => {
 
     expect(stack.resolve(widget.toJson())[0].properties.metrics[0]).toEqual(['CDK', 'Test', { color: '#1f77b4' }]);
     expect(stack.resolve(widget.toJson())[0].properties.annotations.horizontal[0]).toEqual({ yAxis: 'left', value: 100, color: '#d62728' });
-
   });
 
   test('legend position is respected in constructor', () => {
@@ -744,7 +827,6 @@ describe('Graphs', () => {
         },
       },
     }]);
-
   });
 
   test('add setPeriodToTimeRange to GraphWidget', () => {
@@ -826,5 +908,382 @@ describe('Graphs', () => {
         period: 172800,
       },
     }]);
+  });
+
+  test('add start and end properties to GraphWidget', () => {
+    // GIVEN
+    const stack = new Stack();
+    const widget = new GraphWidget({
+      left: [new Metric({ namespace: 'CDK', metricName: 'Test' })],
+      view: GraphWidgetView.PIE,
+      start: '-P7D',
+      end: '2018-12-17T06:00:00.000Z',
+    });
+
+    // THEN
+    expect(stack.resolve(widget.toJson())).toEqual([{
+      type: 'metric',
+      width: 6,
+      height: 6,
+      properties: {
+        view: 'pie',
+        region: { Ref: 'AWS::Region' },
+        metrics: [
+          ['CDK', 'Test'],
+        ],
+        yAxis: {},
+        start: '-P7D',
+        end: '2018-12-17T06:00:00.000Z',
+      },
+    }]);
+  });
+
+  test('add start and end properties to SingleValueWidget', () => {
+    // GIVEN
+    const stack = new Stack();
+    const widget = new SingleValueWidget({
+      metrics: [new Metric({ namespace: 'CDK', metricName: 'Test' })],
+      start: '-P7D',
+      end: '2018-12-17T06:00:00.000Z',
+    });
+
+    // THEN
+    expect(stack.resolve(widget.toJson())).toEqual([{
+      type: 'metric',
+      width: 6,
+      height: 3,
+      properties: {
+        view: 'singleValue',
+        region: { Ref: 'AWS::Region' },
+        metrics: [
+          ['CDK', 'Test'],
+        ],
+        start: '-P7D',
+        end: '2018-12-17T06:00:00.000Z',
+      },
+    }]);
+  });
+
+  test('add start and end properties to GaugeWidget', () => {
+    // GIVEN
+    const stack = new Stack();
+    const widget = new GaugeWidget({
+      metrics: [new Metric({ namespace: 'CDK', metricName: 'Test' })],
+      start: '-P7D',
+      end: '2018-12-17T06:00:00.000Z',
+    });
+
+    // THEN
+    expect(stack.resolve(widget.toJson())).toEqual([{
+      type: 'metric',
+      width: 6,
+      height: 6,
+      properties: {
+        view: 'gauge',
+        region: { Ref: 'AWS::Region' },
+        metrics: [
+          ['CDK', 'Test'],
+        ],
+        yAxis: {
+          left: {
+            min: 0,
+            max: 100,
+          },
+        },
+        start: '-P7D',
+        end: '2018-12-17T06:00:00.000Z',
+      },
+    }]);
+  });
+
+  test('cannot specify an end without a start in GraphWidget', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // THEN
+    expect(() => {
+      new GraphWidget({
+        left: [new Metric({ namespace: 'CDK', metricName: 'Test' })],
+        view: GraphWidgetView.PIE,
+        end: '2018-12-17T06:00:00.000Z',
+      });
+    }).toThrow(/If you specify a value for end, you must also specify a value for start./);
+  });
+
+  test('cannot specify an end without a start in SingleValueWidget', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // THEN
+    expect(() => {
+      new SingleValueWidget({
+        metrics: [new Metric({ namespace: 'CDK', metricName: 'Test' })],
+        end: '2018-12-17T06:00:00.000Z',
+      });
+    }).toThrow(/If you specify a value for end, you must also specify a value for start./);
+  });
+
+  test('cannot specify an end without a start in GaugeWidget', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // THEN
+    expect(() => {
+      new GaugeWidget({
+        metrics: [new Metric({ namespace: 'CDK', metricName: 'Test' })],
+        end: '2018-12-17T06:00:00.000Z',
+      });
+    }).toThrow(/If you specify a value for end, you must also specify a value for start./);
+  });
+
+  test('add annotations to gauge widget', () => {
+    // GIVEN
+    const stack = new Stack();
+    const widget = new GaugeWidget({
+      metrics: [new Metric({ namespace: 'CDK', metricName: 'Test' })],
+      annotations: [
+        {
+          color: '#b2df8d',
+          label: 'Up',
+          value: 1,
+          fill: Shading.ABOVE,
+        },
+      ],
+    });
+
+    // THEN
+    expect(stack.resolve(widget.toJson())).toEqual([{
+      type: 'metric',
+      width: 6,
+      height: 6,
+      properties: {
+        view: 'gauge',
+        region: { Ref: 'AWS::Region' },
+        metrics: [
+          ['CDK', 'Test'],
+        ],
+        yAxis: {
+          left: {
+            min: 0,
+            max: 100,
+          },
+        },
+        annotations: {
+          horizontal: [
+            {
+              color: '#b2df8d',
+              label: 'Up',
+              value: 1,
+              fill: 'above',
+            },
+          ],
+        },
+      },
+    }]);
+  });
+
+  describe('TableWidget', () => {
+    let stack;
+    let metric;
+
+    beforeEach(() => {
+      stack = new Stack();
+      metric = new Metric({ namespace: 'CDK', metricName: 'Test' });
+    });
+
+    test('with optional fields unset', () => {
+      // GIVEN
+      const widget = new TableWidget({
+        metrics: [metric],
+      });
+
+      // THEN
+      expect(stack.resolve(widget.toJson())).toEqual([{
+        type: 'metric',
+        height: 6,
+        width: 6,
+        properties: {
+          view: 'table',
+          metrics: [
+            ['CDK', 'Test'],
+          ],
+          region: { Ref: 'AWS::Region' },
+          table: {
+            layout: 'horizontal',
+            showTimeSeriesData: true,
+            stickySummary: false,
+            summaryColumns: [],
+          },
+          yAxis: {},
+        },
+      }]);
+    });
+
+    test('add metrics lazily', () => {
+      // GIVEN
+      const widget = new TableWidget({});
+      widget.addMetric(metric);
+
+      // THEN
+      expect(stack.resolve(widget.toJson())).toEqual([{
+        type: 'metric',
+        height: 6,
+        width: 6,
+        properties: {
+          view: 'table',
+          metrics: [
+            ['CDK', 'Test'],
+          ],
+          region: { Ref: 'AWS::Region' },
+          table: {
+            layout: 'horizontal',
+            showTimeSeriesData: true,
+            stickySummary: false,
+            summaryColumns: [],
+          },
+          yAxis: {},
+        },
+      }]);
+    });
+
+    test('with most table fields set', () => {
+      // GIVEN
+      const widget = new TableWidget({
+        metrics: [metric],
+        layout: TableLayout.VERTICAL,
+        showUnitsInLabel: true,
+        liveData: true,
+        fullPrecision: true,
+        summary: {
+          columns: [TableSummaryColumn.AVERAGE],
+          hideNonSummaryColumns: true,
+          sticky: true,
+        },
+      });
+
+      // THEN
+      expect(stack.resolve(widget.toJson())).toEqual([{
+        type: 'metric',
+        height: 6,
+        width: 6,
+        properties: {
+          view: 'table',
+          metrics: [
+            ['CDK', 'Test'],
+          ],
+          region: { Ref: 'AWS::Region' },
+          liveData: true,
+          singleValueFullPrecision: true,
+          table: {
+            layout: 'vertical',
+            showTimeSeriesData: false,
+            stickySummary: true,
+            summaryColumns: ['AVG'],
+          },
+          yAxis: {
+            left: {
+              showUnits: true,
+            },
+          },
+        },
+      }]);
+    });
+
+    test('with thresholds', () => {
+      // GIVEN
+      const widget = new TableWidget({
+        metrics: [metric],
+        thresholds: [
+          TableThreshold.above(1000, Color.RED),
+          TableThreshold.between(500, 1000, Color.ORANGE),
+          TableThreshold.below(500, Color.GREEN),
+        ],
+      });
+
+      // THEN
+      expect(stack.resolve(widget.toJson())).toEqual([{
+        type: 'metric',
+        height: 6,
+        width: 6,
+        properties: {
+          view: 'table',
+          metrics: [
+            ['CDK', 'Test'],
+          ],
+          region: { Ref: 'AWS::Region' },
+          table: {
+            layout: 'horizontal',
+            showTimeSeriesData: true,
+            stickySummary: false,
+            summaryColumns: [],
+          },
+          yAxis: {},
+          annotations: {
+            horizontal: [
+              {
+                color: '#d62728',
+                fill: 'above',
+                value: 1000,
+              },
+              [
+                {
+                  color: '#ff7f0e',
+                  value: 500,
+                },
+                {
+                  value: 1000,
+                },
+              ],
+              {
+                color: '#2ca02c',
+                fill: 'below',
+                value: 500,
+              },
+            ],
+          },
+        },
+      }]);
+    });
+
+    test('with start and end set', () => {
+      // GIVEN
+      const widget = new TableWidget({
+        metrics: [metric],
+        start: '-P7D',
+        end: '2018-12-17T06:00:00.000Z',
+      });
+
+      // THEN
+      expect(stack.resolve(widget.toJson())).toEqual([{
+        type: 'metric',
+        height: 6,
+        width: 6,
+        properties: {
+          view: 'table',
+          metrics: [
+            ['CDK', 'Test'],
+          ],
+          region: { Ref: 'AWS::Region' },
+          table: {
+            layout: 'horizontal',
+            showTimeSeriesData: true,
+            stickySummary: false,
+            summaryColumns: [],
+          },
+          yAxis: {},
+          start: '-P7D',
+          end: '2018-12-17T06:00:00.000Z',
+        },
+      }]);
+    });
+
+    test('cannot specify an end without a start', () => {
+      expect(() => {
+        new TableWidget({
+          metrics: [metric],
+          end: '2018-12-17T06:00:00.000Z',
+        });
+      }).toThrow(/If you specify a value for end, you must also specify a value for start./);
+    });
   });
 });

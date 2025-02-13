@@ -4,7 +4,6 @@ import * as cdk from '../../../core';
 import { SnsPublish, MessageAttributeDataType, MessageAttribute } from '../../lib/sns/publish';
 
 describe('Publish', () => {
-
   test('default settings', () => {
     // GIVEN
     const stack = new cdk.Stack();
@@ -38,6 +37,42 @@ describe('Publish', () => {
       },
     });
   });
+
+  test('default settings - using JSONata', () => {
+  // GIVEN
+    const stack = new cdk.Stack();
+    const topic = new sns.Topic(stack, 'Topic');
+
+    // WHEN
+    const task = SnsPublish.jsonata(stack, 'Publish', {
+      topic,
+      message: sfn.TaskInput.fromText('Publish this message'),
+    });
+
+    // THEN
+    expect(stack.resolve(task.toStateJson())).toEqual({
+      Type: 'Task',
+      QueryLanguage: 'JSONata',
+      Resource: {
+        'Fn::Join': [
+          '',
+          [
+            'arn:',
+            {
+              Ref: 'AWS::Partition',
+            },
+            ':states:::sns:publish',
+          ],
+        ],
+      },
+      End: true,
+      Arguments: {
+        TopicArn: { Ref: 'TopicBFC7AF6E' },
+        Message: 'Publish this message',
+      },
+    });
+  });
+
   test('with message attributes', () => {
     // GIVEN
     const stack = new cdk.Stack();
@@ -335,5 +370,158 @@ describe('Publish', () => {
         message: sfn.TaskInput.fromText('Publish this message'),
       });
     }).toThrow(/Unsupported service integration pattern. Supported Patterns: REQUEST_RESPONSE,WAIT_FOR_TASK_TOKEN. Received: RUN_JOB/);
+  });
+
+  test('MessageGroupId and messageDeduplicationId supplied to FIFO topic without contentBasedDeduplication', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const topic = new sns.Topic(stack, 'Topic', {
+      fifo: true,
+    });
+
+    // WHEN
+    const task = new SnsPublish(stack, 'Publish', {
+      topic,
+      integrationPattern: sfn.IntegrationPattern.REQUEST_RESPONSE,
+      message: sfn.TaskInput.fromText('Publish this message'),
+      messageGroupId: 'messageGroupId',
+      messageDeduplicationId: 'messageDeduplicationId',
+    });
+
+    // THEN
+    expect(stack.resolve(task.toStateJson())).toEqual({
+      Type: 'Task',
+      Resource: {
+        'Fn::Join': [
+          '',
+          [
+            'arn:',
+            {
+              Ref: 'AWS::Partition',
+            },
+            ':states:::sns:publish',
+          ],
+        ],
+      },
+      End: true,
+      Parameters: {
+        TopicArn: {
+          Ref: 'TopicBFC7AF6E',
+        },
+        Message: 'Publish this message',
+        MessageGroupId: 'messageGroupId',
+        MessageDeduplicationId: 'messageDeduplicationId',
+      },
+    });
+  });
+
+  test('MessageGroupId supplied to FIFO topic with contentBasedDeduplication', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const topic = new sns.Topic(stack, 'Topic', {
+      fifo: true,
+      contentBasedDeduplication: true,
+    });
+
+    // WHEN
+    const task = new SnsPublish(stack, 'Publish', {
+      topic,
+      integrationPattern: sfn.IntegrationPattern.REQUEST_RESPONSE,
+      message: sfn.TaskInput.fromText('Publish this message'),
+      messageGroupId: 'messageGroupId',
+    });
+
+    // THEN
+    expect(stack.resolve(task.toStateJson())).toEqual({
+      Type: 'Task',
+      Resource: {
+        'Fn::Join': [
+          '',
+          [
+            'arn:',
+            {
+              Ref: 'AWS::Partition',
+            },
+            ':states:::sns:publish',
+          ],
+        ],
+      },
+      End: true,
+      Parameters: {
+        TopicArn: {
+          Ref: 'TopicBFC7AF6E',
+        },
+        Message: 'Publish this message',
+        MessageGroupId: 'messageGroupId',
+      },
+    });
+  });
+
+  test('messageGroupId is required for FIFO topics', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const topic = new sns.Topic(stack, 'Topic', {
+      fifo: true,
+    });
+
+    expect(() => {
+      new SnsPublish(stack, 'Publish', {
+        topic,
+        integrationPattern: sfn.IntegrationPattern.REQUEST_RESPONSE,
+        message: sfn.TaskInput.fromText('Publish this message'),
+      });
+    }).toThrow(/'messageGroupId' is required for FIFO topics/);
+  });
+
+  test('messageGroupId length validation', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const topic = new sns.Topic(stack, 'Topic', {
+      fifo: true,
+    });
+
+    expect(() => {
+      new SnsPublish(stack, 'Publish', {
+        topic,
+        integrationPattern: sfn.IntegrationPattern.REQUEST_RESPONSE,
+        message: sfn.TaskInput.fromText('Publish this message'),
+        messageGroupId: 'long'.repeat(100),
+      });
+    }).toThrow(/'messageGroupId' must be at most 128 characters long/);
+  });
+
+  test('messageDeduplicationId is required for FIFO topics with contentBasedDeduplication disabled', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const topic = new sns.Topic(stack, 'Topic', {
+      fifo: true,
+    });
+
+    expect(() => {
+      new SnsPublish(stack, 'Publish', {
+        topic,
+        integrationPattern: sfn.IntegrationPattern.REQUEST_RESPONSE,
+        message: sfn.TaskInput.fromText('Publish this message'),
+        messageGroupId: 'messageGroupId',
+      });
+    }).toThrow(/'messageDeduplicationId' is required for FIFO topics with 'contentBasedDeduplication' disabled/);
+  });
+
+  test('messageDeduplicationId length validation', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const topic = new sns.Topic(stack, 'Topic', {
+      fifo: true,
+    });
+
+    expect(() => {
+      new SnsPublish(stack, 'Publish', {
+        topic,
+        integrationPattern: sfn.IntegrationPattern.REQUEST_RESPONSE,
+        message: sfn.TaskInput.fromText('Publish this message'),
+        messageGroupId: 'messageGroupId',
+        messageDeduplicationId: 'long'.repeat(100),
+      });
+    }).toThrow(/'messageDeduplicationId' must be at most 128 characters long/);
   });
 });

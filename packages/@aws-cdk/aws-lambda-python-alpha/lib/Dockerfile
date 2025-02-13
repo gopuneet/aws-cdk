@@ -6,6 +6,9 @@ FROM $IMAGE
 ARG PIP_INDEX_URL
 ARG PIP_EXTRA_INDEX_URL
 ARG HTTPS_PROXY
+# pipenv 2022.4.8 is the last version with Python 3.6 support
+ARG PIPENV_VERSION=2022.4.8
+ARG POETRY_VERSION=1.5.1
 
 # Add virtualenv path
 ENV PATH="/usr/app/venv/bin:$PATH"
@@ -17,7 +20,7 @@ ENV PIP_CACHE_DIR=/tmp/pip-cache
 ENV POETRY_CACHE_DIR=/tmp/poetry-cache
 
 RUN \
-# create a new virtualenv for python to use 
+# create a new virtualenv for python to use
 # so that it isn't using root
     python -m venv /usr/app/venv && \
 # Create a new location for the pip cache
@@ -30,8 +33,8 @@ RUN \
     mkdir /tmp/poetry-cache && \
 # Ensure all users can write to poetry cache
     chmod -R 777 /tmp/poetry-cache && \
-# pipenv 2022.4.8 is the last version with Python 3.6 support
-    pip install pipenv==2022.4.8 poetry && \
+# Install pipenv and poetry
+    pip install pipenv==$PIPENV_VERSION poetry==$POETRY_VERSION && \
 # Ensure no temporary files remain in the caches
     rm -rf /tmp/pip-cache/* /tmp/poetry-cache/*
 

@@ -1,11 +1,13 @@
 import * as zlib from 'zlib';
 import { Construct } from 'constructs';
 import { ConstructInfo, constructInfoFromStack } from './runtime-info';
+import * as cxapi from '../../../cx-api';
 import { RegionInfo } from '../../../region-info';
 import { CfnCondition } from '../cfn-condition';
 import { Fn } from '../cfn-fn';
 import { Aws } from '../cfn-pseudo';
 import { CfnResource } from '../cfn-resource';
+import { FeatureFlags } from '../feature-flags';
 import { Lazy } from '../lazy';
 import { Stack } from '../stack';
 import { Token } from '../token';
@@ -16,13 +18,14 @@ import { Token } from '../token';
 export class MetadataResource extends Construct {
   constructor(scope: Stack, id: string) {
     super(scope, id);
-
     const metadataServiceExists = Token.isUnresolved(scope.region) || RegionInfo.get(scope.region).cdkMetadataResourceAvailable;
+    const enableAdditionalTelemtry = FeatureFlags.of(scope).isEnabled(cxapi.ENABLE_ADDITIONAL_METADATA_COLLECTION) ?? false;
     if (metadataServiceExists) {
+      const constructInfo = constructInfoFromStack(scope);
       const resource = new CfnResource(this, 'Default', {
         type: 'AWS::CDK::Metadata',
         properties: {
-          Analytics: Lazy.string({ produce: () => formatAnalytics(constructInfoFromStack(scope)) }),
+          Analytics: Lazy.string({ produce: () => formatAnalytics(constructInfo, enableAdditionalTelemtry) }),
         },
       });
 
@@ -51,27 +54,42 @@ function makeCdkMetadataAvailableCondition() {
 class Trie extends Map<string, Trie> { }
 
 /**
- * Formats a list of construct fully-qualified names (FQNs) and versions into a (possibly compressed) prefix-encoded string.
+ * Formats the analytics string which has 3 or 4 sections separated by colons (:)
  *
- * The list of ConstructInfos is logically formatted into:
- * ${version}!${fqn} (e.g., "1.90.0!aws-cdk-lib.Stack")
- * and then all of the construct-versions are grouped with common prefixes together, grouping common parts in '{}' and separating items with ','.
+ * version:encoding:constructinfo OR version:encoding:constructinfo:appinfo
+ *
+ * The constructinfo section is a list of construct fully-qualified names (FQNs)
+ * and versions into a (possibly compressed) prefix-encoded string.
+ *
+ * The list of ConstructInfos is logically formatted into: ${version}!${fqn}
+ * (e.g., "1.90.0!aws-cdk-lib.Stack") and then all of the construct-versions are
+ * grouped with common prefixes together, grouping common parts in '{}' and
+ * separating items with ','.
  *
  * Example:
  * [1.90.0!aws-cdk-lib.Stack, 1.90.0!aws-cdk-lib.Construct, 1.90.0!aws-cdk-lib.service.Resource, 0.42.1!aws-cdk-lib-experiments.NewStuff]
  * Becomes:
  * 1.90.0!aws-cdk-lib.{Stack,Construct,service.Resource},0.42.1!aws-cdk-lib-experiments.NewStuff
  *
- * The whole thing is then either included directly as plaintext as:
- * v2:plaintext:{prefixEncodedList}
- * Or is compressed and base64-encoded, and then formatted as:
+ * The whole thing is then compressed and base64-encoded, and then formatted as:
  * v2:deflate64:{prefixEncodedListCompressedAndEncoded}
+ *
+ * The appinfo section is optional, and currently only added if the app was generated using `cdk migrate`
+ * It is also compressed and base64-encoded. In this case, the string will be formatted as:
+ * v2:deflate64:{prefixEncodedListCompressedAndEncoded}:{'cdk-migrate'CompressedAndEncoded}
  *
  * Exported/visible for ease of testing.
  */
-export function formatAnalytics(infos: ConstructInfo[]) {
+export function formatAnalytics(infos: ConstructInfo[], enableAdditionalTelemtry: boolean = false) {
   const trie = new Trie();
-  infos.forEach(info => insertFqnInTrie(`${info.version}!${info.fqn}`, trie));
+
+  // only append additional telemetry information to prefix encoding and gzip compress
+  // if feature flag is enabled; otherwise keep the old behaviour.
+  if (enableAdditionalTelemtry) {
+    infos.forEach(info => insertFqnInTrie(`${info.version}!${info.fqn}`, trie, info.metadata));
+  } else {
+    infos.forEach(info => insertFqnInTrie(`${info.version}!${info.fqn}`, trie));
+  }
 
   const plaintextEncodedConstructs = prefixEncodeTrie(trie);
   const compressedConstructsBuffer = zlib.gzipSync(Buffer.from(plaintextEncodedConstructs));
@@ -81,18 +99,31 @@ export function formatAnalytics(infos: ConstructInfo[]) {
   setGzipOperatingSystemToUnknown(compressedConstructsBuffer);
 
   const compressedConstructs = compressedConstructsBuffer.toString('base64');
-  return `v2:deflate64:${compressedConstructs}`;
+  const analyticsString = `v2:deflate64:${compressedConstructs}`;
+
+  if (process.env.CDK_CONTEXT_JSON && JSON.parse(process.env.CDK_CONTEXT_JSON)['cdk-migrate']) {
+    const compressedAppInfoBuffer = zlib.gzipSync(Buffer.from('cdk-migrate'));
+    const compressedAppInfo = compressedAppInfoBuffer.toString('base64');
+    analyticsString.concat(':', compressedAppInfo);
+  }
+
+  return analyticsString;
 }
 
 /**
  * Splits after non-alphanumeric characters (e.g., '.', '/') in the FQN
  * and insert each piece of the FQN in nested map (i.e., simple trie).
  */
-function insertFqnInTrie(fqn: string, trie: Trie) {
+function insertFqnInTrie(fqn: string, trie: Trie, metadata?: Record<string, any>[]) {
   for (const fqnPart of fqn.replace(/[^a-z0-9]/gi, '$& ').split(' ')) {
     const nextLevelTreeRef = trie.get(fqnPart) ?? new Trie();
     trie.set(fqnPart, nextLevelTreeRef);
     trie = nextLevelTreeRef;
+  }
+
+  // if 'metadata' is defined, add it to end of Trie
+  if (metadata) {
+    trie.set(JSON.stringify(metadata), new Trie());
   }
   return trie;
 }

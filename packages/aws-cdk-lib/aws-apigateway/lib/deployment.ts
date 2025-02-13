@@ -3,7 +3,9 @@ import { CfnDeployment } from './apigateway.generated';
 import { Method } from './method';
 import { IRestApi, RestApi, SpecRestApi, RestApiBase } from './restapi';
 import { Lazy, RemovalPolicy, Resource, CfnResource } from '../../core';
+import { ValidationError } from '../../core/lib/errors';
 import { md5hash } from '../../core/lib/helpers-internal';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
 
 export interface DeploymentProps {
   /**
@@ -26,6 +28,15 @@ export interface DeploymentProps {
    * @default false
    */
   readonly retainDeployments?: boolean;
+
+  /**
+   * The name of the stage the API Gateway deployment deploys to.
+   *
+   * @default - No stage name. If the `stageName` property is set but a stage with the
+   * corresponding name does not exist, a new stage resource will be created with the
+   * provided stage name.
+   */
+  readonly stageName?: string;
 }
 
 /**
@@ -62,15 +73,22 @@ export class Deployment extends Resource {
   /** @attribute */
   public readonly deploymentId: string;
   public readonly api: IRestApi;
+  /**
+   * The stage of the API gateway deployment.
+   */
+  public readonly stageName?: string;
 
   private readonly resource: LatestDeploymentResource;
 
   constructor(scope: Construct, id: string, props: DeploymentProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.resource = new LatestDeploymentResource(this, 'Resource', {
       description: props.description,
       restApi: props.api,
+      stageName: props.stageName,
     });
 
     if (props.retainDeployments) {
@@ -91,8 +109,9 @@ export class Deployment extends Resource {
    *
    * This should be called by constructs of the API Gateway model that want to
    * invalidate the deployment when their settings change. The component will
-   * be resolve()ed during synthesis so tokens are welcome.
+   * be resolved during synthesis so tokens are welcome.
    */
+  @MethodMetadata()
   public addToLogicalId(data: any) {
     this.resource.addToLogicalId(data);
   }
@@ -126,6 +145,7 @@ export class Deployment extends Resource {
 interface LatestDeploymentResourceProps {
   readonly description?: string;
   readonly restApi: IRestApi;
+  readonly stageName?: string;
 }
 
 class LatestDeploymentResource extends CfnDeployment {
@@ -137,6 +157,7 @@ class LatestDeploymentResource extends CfnDeployment {
     super(scope, id, {
       description: props.description,
       restApiId: props.restApi.restApiId,
+      stageName: props.stageName,
     });
 
     this.api = props.restApi;
@@ -152,7 +173,7 @@ class LatestDeploymentResource extends CfnDeployment {
     // if the construct is locked, it means we are already synthesizing and then
     // we can't modify the hash because we might have already calculated it.
     if (this.node.locked) {
-      throw new Error('Cannot modify the logical ID when the construct is locked');
+      throw new ValidationError('Cannot modify the logical ID when the construct is locked', this);
     }
 
     this.hashComponents.push(data);
@@ -162,7 +183,6 @@ class LatestDeploymentResource extends CfnDeployment {
     const hash = [...this.hashComponents];
 
     if (this.api instanceof RestApi || this.api instanceof SpecRestApi) { // Ignore IRestApi that are imported
-
       // Add CfnRestApi to the logical id so a new deployment is triggered when any of its properties change.
       const cfnRestApiCF = (this.api.node.defaultChild as any)._toCloudFormation();
       hash.push(this.stack.resolve(cfnRestApiCF));

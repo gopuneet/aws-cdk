@@ -1,8 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Construct, Node } from 'constructs';
-import * as semver from 'semver';
 import * as YAML from 'yaml';
+import { IAccessPolicy, IAccessEntry, AccessEntry, AccessPolicy, AccessScopeType } from './access-entry';
+import { IAddon, Addon } from './addon';
 import { AlbController, AlbControllerOptions } from './alb-controller';
 import { AwsAuth } from './aws-auth';
 import { ClusterResource, clusterArnComponents } from './cluster-resource';
@@ -20,11 +21,13 @@ import { ServiceAccount, ServiceAccountOptions } from './service-account';
 import { LifecycleLabel, renderAmazonLinuxUserData, renderBottlerocketUserData } from './user-data';
 import * as autoscaling from '../../aws-autoscaling';
 import * as ec2 from '../../aws-ec2';
+import { CidrBlock } from '../../aws-ec2/lib/network-util';
 import * as iam from '../../aws-iam';
 import * as kms from '../../aws-kms';
 import * as lambda from '../../aws-lambda';
 import * as ssm from '../../aws-ssm';
 import { Annotations, CfnOutput, CfnResource, IResource, Resource, Stack, Tags, Token, Duration, Size } from '../../core';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
 
 // defaults are based on https://eksctl.io
 const DEFAULT_CAPACITY_COUNT = 2;
@@ -88,6 +91,20 @@ export interface ICluster extends IResource, ec2.IConnectable {
   readonly openIdConnectProvider: iam.IOpenIdConnectProvider;
 
   /**
+   * The EKS Pod Identity Agent addon for the EKS cluster.
+   *
+   * The EKS Pod Identity Agent is responsible for managing the temporary credentials
+   * used by pods in the cluster to access AWS resources. It runs as a DaemonSet on
+   * each node and provides the necessary credentials to the pods based on their
+   * associated service account.
+   *
+   * This property returns the `CfnAddon` resource representing the EKS Pod Identity
+   * Agent addon. If the addon has not been created yet, it will be created and
+   * returned.
+   */
+  readonly eksPodIdentityAgent?: IAddon;
+
+  /**
    * An IAM role that can perform kubectl operations against this cluster.
    *
    * The role should be mapped to the `system:masters` Kubernetes RBAC role.
@@ -127,7 +144,6 @@ export interface ICluster extends IResource, ec2.IConnectable {
   /**
    * An AWS Lambda layer that includes `kubectl` and `helm`
    *
-   * If not defined, a default layer will be used containing Kubectl 1.20 and Helm 3.8
    */
   readonly kubectlLayer?: lambda.ILayerVersion;
 
@@ -183,6 +199,12 @@ export interface ICluster extends IResource, ec2.IConnectable {
    * apply` operation with the `--prune` switch.
    */
   readonly prune: boolean;
+
+  /**
+   * The authentication mode for the cluster.
+   * @default AuthenticationMode.CONFIG_MAP
+   */
+  readonly authenticationMode?: AuthenticationMode;
 
   /**
    * Creates a new service account with corresponding IAM Role (IRSA).
@@ -354,8 +376,7 @@ export interface ClusterAttributes {
    * This layer is used by the kubectl handler to apply manifests and install
    * helm charts. You must pick an appropriate releases of one of the
    * `@aws-cdk/layer-kubectl-vXX` packages, that works with the version of
-   * Kubernetes you have chosen. If you don't supply this value `kubectl`
-   * 1.20 will be used, but that version is most likely too old.
+   * Kubernetes you have chosen.
    *
    * The handler expects the layer to include the following executables:
    *
@@ -364,7 +385,7 @@ export interface ClusterAttributes {
    * /opt/kubectl/kubectl
    * ```
    *
-   * @default - a default layer with Kubectl 1.20 and helm 3.8.
+   * @default - No default layer will be provided
    */
   readonly kubectlLayer?: lambda.ILayerVersion;
 
@@ -439,8 +460,6 @@ export interface CommonClusterOptions {
 
   /**
    * Where to place EKS Control Plane ENIs
-   *
-   * If you want to create public load balancers, this must include public subnets.
    *
    * For example, to only select private subnets, supply the following:
    *
@@ -547,8 +566,7 @@ export interface ClusterOptions extends CommonClusterOptions {
    * This layer is used by the kubectl handler to apply manifests and install
    * helm charts. You must pick an appropriate releases of one of the
    * `@aws-cdk/layer-kubectl-vXX` packages, that works with the version of
-   * Kubernetes you have chosen. If you don't supply this value `kubectl`
-   * 1.20 will be used, but that version is most likely too old.
+   * Kubernetes you have chosen.
    *
    * The handler expects the layer to include the following executables:
    *
@@ -556,10 +574,8 @@ export interface ClusterOptions extends CommonClusterOptions {
    * /opt/helm/helm
    * /opt/kubectl/kubectl
    * ```
-   *
-   * @default - a default layer with Kubectl 1.20.
    */
-  readonly kubectlLayer?: lambda.ILayerVersion;
+  readonly kubectlLayer: lambda.ILayerVersion;
 
   /**
    * An AWS Lambda layer that contains the `aws` CLI.
@@ -611,7 +627,7 @@ export interface ClusterOptions extends CommonClusterOptions {
    * ```ts
    * const layer = new lambda.LayerVersion(this, 'proxy-agent-layer', {
    *   code: lambda.Code.fromAsset(`${__dirname}/layer.zip`),
-   *   compatibleRuntimes: [lambda.Runtime.NODEJS_14_X],
+   *   compatibleRuntimes: [lambda.Runtime.NODEJS_LATEST],
    * });
    * ```
    *
@@ -677,6 +693,25 @@ export interface ClusterOptions extends CommonClusterOptions {
    * @default - none
    */
   readonly clusterLogging?: ClusterLoggingTypes[];
+
+  /**
+   * The desired authentication mode for the cluster.
+   * @default AuthenticationMode.CONFIG_MAP
+   */
+  readonly authenticationMode?: AuthenticationMode;
+
+  /**
+   * IPv4 CIDR blocks defining the expected address range of hybrid nodes
+   * that will join the cluster.
+   * @default - none
+   */
+  readonly remoteNodeNetworks?: RemoteNodeNetwork[];
+
+  /**
+   * IPv4 CIDR blocks for Pods running Kubernetes webhooks on hybrid nodes.
+   * @default - none
+   */
+  readonly remotePodNetworks?: RemotePodNetwork[];
 }
 
 /**
@@ -707,7 +742,6 @@ interface EndpointAccessConfig {
  * Endpoint access characteristics.
  */
 export class EndpointAccess {
-
   /**
    * The cluster endpoint is accessible from outside of your VPC.
    * Worker node traffic will leave your VPC to connect to the endpoint.
@@ -812,6 +846,16 @@ export interface ClusterProps extends ClusterOptions {
   readonly kubectlLambdaRole?: iam.IRole;
 
   /**
+   * Whether or not IAM principal of the cluster creator was set as a cluster admin access entry
+   * during cluster creation time.
+   *
+   * Changing this value after the cluster has been created will result in the cluster being replaced.
+   *
+   * @default true
+   */
+  readonly bootstrapClusterCreatorAdminPermissions?: boolean;
+
+  /**
    * The tags assigned to the EKS cluster
    *
    * @default - none
@@ -879,6 +923,7 @@ export class KubernetesVersion {
    * When creating a `Cluster` with this version, you need to also specify the
    * `kubectlLayer` property with a `KubectlV22Layer` from
    * `@aws-cdk/lambda-layer-kubectl-v22`.
+   * @deprecated Use newer version of EKS
    */
   public static readonly V1_22 = KubernetesVersion.of('1.22');
 
@@ -919,6 +964,60 @@ export class KubernetesVersion {
   public static readonly V1_26 = KubernetesVersion.of('1.26');
 
   /**
+   * Kubernetes version 1.27
+   *
+   * When creating a `Cluster` with this version, you need to also specify the
+   * `kubectlLayer` property with a `KubectlV27Layer` from
+   * `@aws-cdk/lambda-layer-kubectl-v27`.
+   */
+  public static readonly V1_27 = KubernetesVersion.of('1.27');
+
+  /**
+   * Kubernetes version 1.28
+   *
+   * When creating a `Cluster` with this version, you need to also specify the
+   * `kubectlLayer` property with a `KubectlV28Layer` from
+   * `@aws-cdk/lambda-layer-kubectl-v28`.
+   */
+  public static readonly V1_28 = KubernetesVersion.of('1.28');
+
+  /**
+   * Kubernetes version 1.29
+   *
+   * When creating a `Cluster` with this version, you need to also specify the
+   * `kubectlLayer` property with a `KubectlV29Layer` from
+   * `@aws-cdk/lambda-layer-kubectl-v29`.
+   */
+  public static readonly V1_29 = KubernetesVersion.of('1.29');
+
+  /**
+   * Kubernetes version 1.30
+   *
+   * When creating a `Cluster` with this version, you need to also specify the
+   * `kubectlLayer` property with a `KubectlV30Layer` from
+   * `@aws-cdk/lambda-layer-kubectl-v30`.
+   */
+  public static readonly V1_30 = KubernetesVersion.of('1.30');
+
+  /**
+   * Kubernetes version 1.31
+   *
+   * When creating a `Cluster` with this version, you need to also specify the
+   * `kubectlLayer` property with a `KubectlV31Layer` from
+   * `@aws-cdk/lambda-layer-kubectl-v31`.
+   */
+  public static readonly V1_31 = KubernetesVersion.of('1.31');
+
+  /**
+   * Kubernetes version 1.32
+   *
+   * When creating a `Cluster` with this version, you need to also specify the
+   * `kubectlLayer` property with a `KubectlV32Layer` from
+   * `@aws-cdk/lambda-layer-kubectl-v32`.
+   */
+  public static readonly V1_32 = KubernetesVersion.of('1.32');
+
+  /**
    * Custom cluster version
    * @param version custom version number
    */
@@ -930,6 +1029,7 @@ export class KubernetesVersion {
   private constructor(public readonly version: string) { }
 }
 
+// Shared definition with packages/@aws-cdk/custom-resource-handlers/test/aws-eks/compare-log.test.ts
 /**
  * EKS cluster logging types
  */
@@ -970,6 +1070,24 @@ export enum IpFamily {
   IP_V6 = 'ipv6',
 }
 
+/**
+ * Represents the authentication mode for an Amazon EKS cluster.
+ */
+export enum AuthenticationMode {
+  /**
+   * Authenticates using a Kubernetes ConfigMap.
+   */
+  CONFIG_MAP = 'CONFIG_MAP',
+  /**
+   * Authenticates using both the Kubernetes API server and a ConfigMap.
+   */
+  API_AND_CONFIG_MAP = 'API_AND_CONFIG_MAP',
+  /**
+   * Authenticates using the Kubernetes API server.
+   */
+  API = 'API',
+}
+
 abstract class ClusterBase extends Resource implements ICluster {
   public abstract readonly connections: ec2.Connections;
   public abstract readonly vpc: ec2.IVpc;
@@ -983,6 +1101,7 @@ abstract class ClusterBase extends Resource implements ICluster {
   public abstract readonly ipFamily?: IpFamily;
   public abstract readonly kubectlRole?: iam.IRole;
   public abstract readonly kubectlLambdaRole?: iam.IRole;
+  public abstract readonly kubectlLayer?: lambda.ILayerVersion;
   public abstract readonly kubectlEnvironment?: { [key: string]: string };
   public abstract readonly kubectlSecurityGroup?: ec2.ISecurityGroup;
   public abstract readonly kubectlPrivateSubnets?: ec2.ISubnet[];
@@ -1033,7 +1152,6 @@ abstract class ClusterBase extends Resource implements ICluster {
    * @returns a `KubernetesManifest` construct representing the chart.
    */
   public addCdk8sChart(id: string, chart: Construct, options: KubernetesManifestOptions = {}): KubernetesManifest {
-
     const cdk8sChart = chart as any;
 
     // see https://github.com/awslabs/cdk8s/blob/master/packages/cdk8s/src/chart.ts#L84
@@ -1148,7 +1266,7 @@ abstract class ClusterBase extends Resource implements ICluster {
     let mapRole = options.mapRole ?? true;
     if (mapRole && !(this instanceof Cluster)) {
       // do the mapping...
-      Annotations.of(autoScalingGroup).addWarning('Auto-mapping aws-auth role for imported cluster is not supported, please map role manually');
+      Annotations.of(autoScalingGroup).addWarningV2('@aws-cdk/aws-eks:clusterUnsupportedAutoMappingAwsAutoRole', 'Auto-mapping aws-auth role for imported cluster is not supported, please map role manually');
       mapRole = false;
     }
     if (mapRole) {
@@ -1206,7 +1324,7 @@ export interface ServiceLoadBalancerAddressOptions {
 /**
  * Options for fetching an IngressLoadBalancerAddress.
  */
-export interface IngressLoadBalancerAddressOptions extends ServiceLoadBalancerAddressOptions {};
+export interface IngressLoadBalancerAddressOptions extends ServiceLoadBalancerAddressOptions {}
 
 /**
  * A Cluster represents a managed Kubernetes Service (EKS)
@@ -1225,6 +1343,8 @@ export class Cluster extends ClusterBase {
   public static fromClusterAttributes(scope: Construct, id: string, attrs: ClusterAttributes): ICluster {
     return new ImportedCluster(scope, id, attrs);
   }
+
+  private accessEntries: Map<string, IAccessEntry> = new Map();
 
   /**
    * The VPC in which this Cluster was created
@@ -1365,9 +1485,13 @@ export class Cluster extends ClusterBase {
   private _openIdConnectProvider?: iam.IOpenIdConnectProvider;
 
   /**
+   * an EKS Pod Identity Agent instance
+   */
+  private _eksPodIdentityAgent?: IAddon;
+
+  /**
    * An AWS Lambda layer that includes `kubectl` and `helm`
    *
-   * If not defined, a default layer will be used containing Kubectl 1.20 and Helm 3.8
    */
   readonly kubectlLayer?: lambda.ILayerVersion;
 
@@ -1409,6 +1533,17 @@ export class Cluster extends ClusterBase {
    * Will be undefined if `albController` wasn't configured.
    */
   public readonly albController?: AlbController;
+
+  /**
+   * The authentication mode for the Amazon EKS cluster.
+   *
+   * The authentication mode determines how users and applications authenticate to the Kubernetes API server.
+   *
+   * @property {AuthenticationMode} [authenticationMode] - The authentication mode for the Amazon EKS cluster.
+   *
+   * @default CONFIG_MAP.
+   */
+  public readonly authenticationMode?: AuthenticationMode;
 
   /**
    * If this cluster is kubectl-enabled, returns the `ClusterResource` object
@@ -1454,16 +1589,14 @@ export class Cluster extends ClusterBase {
     super(scope, id, {
       physicalName: props.clusterName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const stack = Stack.of(this);
 
     this.prune = props.prune ?? true;
     this.vpc = props.vpc || new ec2.Vpc(this, 'DefaultVpc');
 
-    const kubectlVersion = new semver.SemVer(`${props.version.version}.0`);
-    if (semver.gte(kubectlVersion, '1.22.0') && !props.kubectlLayer) {
-      Annotations.of(this).addWarning(`You created a cluster with Kubernetes Version ${props.version.version} without specifying the kubectlLayer property. This may cause failures as the kubectl version provided with aws-cdk-lib is 1.20, which is only guaranteed to be compatible with Kubernetes versions 1.19-1.21. Please provide a kubectlLayer from @aws-cdk/lambda-layer-kubectl-v${kubectlVersion.minor}.`);
-    };
     this.version = props.version;
 
     // since this lambda role needs to be added to the trust policy of the creation role,
@@ -1549,11 +1682,27 @@ export class Cluster extends ClusterBase {
       throw new Error('Cannot specify serviceIpv4Cidr with ipFamily equal to IpFamily.IP_V6');
     }
 
+    this.validateRemoteNetworkConfig(props);
+
+    this.authenticationMode = props.authenticationMode;
+
     const resource = this._clusterResource = new ClusterResource(this, 'Resource', {
       name: this.physicalName,
       environment: props.clusterHandlerEnvironment,
       roleArn: this.role.roleArn,
       version: props.version.version,
+      accessconfig: {
+        authenticationMode: props.authenticationMode,
+        bootstrapClusterCreatorAdminPermissions: props.bootstrapClusterCreatorAdminPermissions,
+      },
+      ...(props.remoteNodeNetworks ? {
+        remoteNetworkConfig: {
+          remoteNodeNetworks: props.remoteNodeNetworks,
+          ...(props.remotePodNetworks ? {
+            remotePodNetworks: props.remotePodNetworks,
+          }: {}),
+        },
+      } : {}),
       resourcesVpcConfig: {
         securityGroupIds: [securityGroup.securityGroupId],
         subnetIds,
@@ -1583,7 +1732,6 @@ export class Cluster extends ClusterBase {
     });
 
     if (this.endpointAccess._config.privateAccess && privateSubnets.length !== 0) {
-
       // when private access is enabled and the vpc has private subnets, lets connect
       // the provider to the vpc so that it will work even when restricting public access.
 
@@ -1651,12 +1799,26 @@ export class Cluster extends ClusterBase {
       new CfnOutput(this, 'ClusterName', { value: this.clusterName });
     }
 
+    const supportAuthenticationApi = (this.authenticationMode === AuthenticationMode.API ||
+      this.authenticationMode === AuthenticationMode.API_AND_CONFIG_MAP) ? true : false;
+
     // do not create a masters role if one is not provided. Trusting the accountRootPrincipal() is too permissive.
     if (props.mastersRole) {
       const mastersRole = props.mastersRole;
 
-      // map the IAM role to the `system:masters` group.
-      this.awsAuth.addMastersRole(mastersRole);
+      // if we support authentication API we create an access entry for this mastersRole
+      // with cluster scope.
+      if (supportAuthenticationApi) {
+        this.grantAccess('mastersRoleAccess', props.mastersRole.roleArn, [
+          AccessPolicy.fromAccessPolicyName('AmazonEKSClusterAdminPolicy', {
+            accessScopeType: AccessScopeType.CLUSTER,
+          }),
+        ]);
+      } else {
+        // if we don't support authentication API we should fallback to configmap
+        // this would avoid breaking changes as well if authenticationMode is undefined
+        this.awsAuth.addMastersRole(mastersRole);
+      }
 
       if (props.outputMastersRoleArn) {
         new CfnOutput(this, 'MastersRoleArn', { value: mastersRole.roleArn });
@@ -1688,7 +1850,22 @@ export class Cluster extends ClusterBase {
     }
 
     this.defineCoreDnsComputeType(props.coreDnsComputeType ?? CoreDnsComputeType.EC2);
+  }
 
+  /**
+   * Grants the specified IAM principal access to the EKS cluster based on the provided access policies.
+   *
+   * This method creates an `AccessEntry` construct that grants the specified IAM principal the access permissions
+   * defined by the provided `IAccessPolicy` array. This allows the IAM principal to perform the actions permitted
+   * by the access policies within the EKS cluster.
+   *
+   * @param id - The ID of the `AccessEntry` construct to be created.
+   * @param principal - The IAM principal (role or user) to be granted access to the EKS cluster.
+   * @param accessPolicies - An array of `IAccessPolicy` objects that define the access permissions to be granted to the IAM principal.
+   */
+  @MethodMetadata()
+  public grantAccess(id: string, principal: string, accessPolicies: IAccessPolicy[]) {
+    this.addToAccessEntry(id, principal, accessPolicies);
   }
 
   /**
@@ -1697,8 +1874,8 @@ export class Cluster extends ClusterBase {
    * @param serviceName The name of the service.
    * @param options Additional operation options.
    */
+  @MethodMetadata()
   public getServiceLoadBalancerAddress(serviceName: string, options: ServiceLoadBalancerAddressOptions = {}): string {
-
     const loadBalancerAddress = new KubernetesObjectValue(this, `${serviceName}LoadBalancerAddress`, {
       cluster: this,
       objectType: 'service',
@@ -1709,7 +1886,6 @@ export class Cluster extends ClusterBase {
     });
 
     return loadBalancerAddress.value;
-
   }
 
   /**
@@ -1718,8 +1894,8 @@ export class Cluster extends ClusterBase {
    * @param ingressName The name of the ingress.
    * @param options Additional operation options.
    */
+  @MethodMetadata()
   public getIngressLoadBalancerAddress(ingressName: string, options: IngressLoadBalancerAddressOptions = {}): string {
-
     const loadBalancerAddress = new KubernetesObjectValue(this, `${ingressName}LoadBalancerAddress`, {
       cluster: this,
       objectType: 'ingress',
@@ -1730,7 +1906,6 @@ export class Cluster extends ClusterBase {
     });
 
     return loadBalancerAddress.value;
-
   }
 
   /**
@@ -1748,6 +1923,7 @@ export class Cluster extends ClusterBase {
    * daemon will be installed on all spot instances to handle
    * [EC2 Spot Instance Termination Notices](https://aws.amazon.com/blogs/aws/new-ec2-spot-instance-termination-notices/).
    */
+  @MethodMetadata()
   public addAutoScalingGroupCapacity(id: string, options: AutoScalingGroupCapacityOptions): autoscaling.AutoScalingGroup {
     if (options.machineImageType === MachineImageType.BOTTLEROCKET && options.bootstrapOptions !== undefined) {
       throw new Error('bootstrapOptions is not supported for Bottlerocket');
@@ -1774,7 +1950,8 @@ export class Cluster extends ClusterBase {
       spotInterruptHandler: options.spotInterruptHandler,
     });
 
-    if (nodeTypeForInstanceType(options.instanceType) === NodeType.INFERENTIA) {
+    if (nodeTypeForInstanceType(options.instanceType) === NodeType.INFERENTIA ||
+      nodeTypeForInstanceType(options.instanceType) === NodeType.TRAINIUM) {
       this.addNeuronDevicePlugin();
     }
 
@@ -1790,7 +1967,17 @@ export class Cluster extends ClusterBase {
    * @param id The ID of the nodegroup
    * @param options options for creating a new nodegroup
    */
+  @MethodMetadata()
   public addNodegroupCapacity(id: string, options?: NodegroupOptions): Nodegroup {
+    const hasInferentiaOrTrainiumInstanceType = [
+      options?.instanceType,
+      ...options?.instanceTypes ?? [],
+    ].some(i => i && (nodeTypeForInstanceType(i) === NodeType.INFERENTIA ||
+      nodeTypeForInstanceType(i) === NodeType.TRAINIUM));
+
+    if (hasInferentiaOrTrainiumInstanceType) {
+      this.addNeuronDevicePlugin();
+    }
     return new Nodegroup(this, `Nodegroup${id}`, {
       cluster: this,
       ...options,
@@ -1847,12 +2034,33 @@ export class Cluster extends ClusterBase {
   }
 
   /**
+   * Retrieves the EKS Pod Identity Agent addon for the EKS cluster.
+   *
+   * The EKS Pod Identity Agent is responsible for managing the temporary credentials
+   * used by pods in the cluster to access AWS resources. It runs as a DaemonSet on
+   * each node and provides the necessary credentials to the pods based on their
+   * associated service account.
+   *
+   */
+  public get eksPodIdentityAgent(): IAddon | undefined {
+    if (!this._eksPodIdentityAgent) {
+      this._eksPodIdentityAgent = new Addon(this, 'EksPodIdentityAgentAddon', {
+        cluster: this,
+        addonName: 'eks-pod-identity-agent',
+      });
+    }
+
+    return this._eksPodIdentityAgent;
+  }
+
+  /**
    * Adds a Fargate profile to this cluster.
    * @see https://docs.aws.amazon.com/eks/latest/userguide/fargate-profile.html
    *
    * @param id the id of this profile
    * @param options profile options
    */
+  @MethodMetadata()
   public addFargateProfile(id: string, options: FargateProfileOptions) {
     return new FargateProfile(this, `fargate-profile-${id}`, {
       ...options,
@@ -1893,6 +2101,33 @@ export class Cluster extends ClusterBase {
     return this._kubectlResourceProvider;
   }
 
+  /**
+   * Adds an access entry to the cluster's access entries map.
+   *
+   * If an entry already exists for the given principal, it adds the provided access policies to the existing entry.
+   * If no entry exists for the given principal, it creates a new access entry with the provided access policies.
+   *
+   * @param principal - The principal (e.g., IAM user or role) for which the access entry is being added.
+   * @param policies - An array of access policies to be associated with the principal.
+   *
+   * @throws {Error} If the uniqueName generated for the new access entry is not unique.
+   *
+   * @returns {void}
+   */
+  private addToAccessEntry(id: string, principal: string, policies: IAccessPolicy[]) {
+    const entry = this.accessEntries.get(principal);
+    if (entry) {
+      (entry as AccessEntry).addAccessPolicies(policies);
+    } else {
+      const newEntry = new AccessEntry(this, id, {
+        principal,
+        cluster: this,
+        accessPolicies: policies,
+      });
+      this.accessEntries.set(principal, newEntry);
+    }
+  }
+
   private defineKubectlProvider() {
     const uid = '@aws-cdk/aws-eks.KubectlProvider';
 
@@ -1912,9 +2147,7 @@ export class Cluster extends ClusterBase {
     const vpcPublicSubnetIds = this.vpc.publicSubnets.map(s => s.subnetId);
 
     for (const placement of this.vpcSubnets) {
-
       for (const subnet of this.vpc.selectSubnets(placement).subnets) {
-
         if (vpcPrivateSubnetIds.includes(subnet.subnetId)) {
           // definitely private, take it.
           privateSubnets.push(subnet);
@@ -1931,7 +2164,6 @@ export class Cluster extends ClusterBase {
         // fail at deploy time :\ (its better than filtering it out and preventing a possibly successful deployment)
         privateSubnets.push(subnet);
       }
-
     }
 
     return privateSubnets;
@@ -1943,7 +2175,7 @@ export class Cluster extends ClusterBase {
    */
   private addNeuronDevicePlugin() {
     if (!this._neuronDevicePlugin) {
-      const fileContents = fs.readFileSync(path.join(__dirname, 'addons/neuron-device-plugin.yaml'), 'utf8');
+      const fileContents = fs.readFileSync(path.join(__dirname, 'addons', 'neuron-device-plugin.yaml'), 'utf8');
       const sanitized = YAML.parse(fileContents);
       this._neuronDevicePlugin = this.addManifest('NeuronDevicePlugin', sanitized);
     }
@@ -1966,7 +2198,7 @@ export class Cluster extends ClusterBase {
           // message (if token): "could not auto-tag public/private subnet with tag..."
           // message (if not token): "count not auto-tag public/private subnet xxxxx with tag..."
           const subnetID = Token.isUnresolved(subnet.subnetId) || Token.isUnresolved([subnet.subnetId]) ? '' : ` ${subnet.subnetId}`;
-          Annotations.of(this).addWarning(`Could not auto-tag ${type} subnet${subnetID} with "${tag}=1", please remember to do this manually`);
+          Annotations.of(this).addWarningV2('@aws-cdk/aws-eks:clusterMustManuallyTagSubnet', `Could not auto-tag ${type} subnet${subnetID} with "${tag}=1", please remember to do this manually`);
           continue;
         }
 
@@ -2014,6 +2246,65 @@ export class Cluster extends ClusterBase {
       applyPatch: renderPatch(CoreDnsComputeType.FARGATE),
       restorePatch: renderPatch(CoreDnsComputeType.EC2),
     });
+  }
+
+  private validateRemoteNetworkConfig(props: ClusterProps) {
+    if (!props.remoteNodeNetworks) { return;}
+    // validate that no two CIDRs overlap within the same remote node network
+    props.remoteNodeNetworks.forEach((network, index) => {
+      const { cidrs } = network;
+      if (cidrs.length > 1) {
+        cidrs.forEach((cidr1, j) => {
+          if (cidrs.slice(j + 1).some(cidr2 => validateCidrPairOverlap(cidr1, cidr2))) {
+            throw new Error(`CIDR ${cidr1} should not overlap with another CIDR in remote node network #${index + 1}`);
+          }
+        });
+      }
+    });
+
+    // validate that no two CIDRs overlap across different remote node networks
+    props.remoteNodeNetworks.forEach((network1, i) => {
+      props.remoteNodeNetworks!.slice(i + 1).forEach((network2, j) => {
+        const [overlap, remoteNodeCidr1, remoteNodeCidr2] = validateCidrBlocksOverlap(network1.cidrs, network2.cidrs);
+        if (overlap) {
+          throw new Error(`CIDR block ${remoteNodeCidr1} in remote node network #${i + 1} should not overlap with CIDR block ${remoteNodeCidr2} in remote node network #${i + j + 2}`);
+        }
+      });
+    });
+
+    if (props.remotePodNetworks) {
+      // validate that no two CIDRs overlap within the same remote pod network
+      props.remotePodNetworks.forEach((network, index) => {
+        const { cidrs } = network;
+        if (cidrs.length > 1) {
+          cidrs.forEach((cidr1, j) => {
+            if (cidrs.slice(j + 1).some(cidr2 => validateCidrPairOverlap(cidr1, cidr2))) {
+              throw new Error(`CIDR ${cidr1} should not overlap with another CIDR in remote pod network #${index + 1}`);
+            }
+          });
+        }
+      });
+
+      // validate that no two CIDRs overlap across different remote pod networks
+      props.remotePodNetworks.forEach((network1, i) => {
+        props.remotePodNetworks!.slice(i + 1).forEach((network2, j) => {
+          const [overlap, remotePodCidr1, remotePodCidr2] = validateCidrBlocksOverlap(network1.cidrs, network2.cidrs);
+          if (overlap) {
+            throw new Error(`CIDR block ${remotePodCidr1} in remote pod network #${i + 1} should not overlap with CIDR block ${remotePodCidr2} in remote pod network #${i + j + 2}`);
+          }
+        });
+      });
+
+      // validate that no two CIDRs overlap between a given remote node network and remote pod network
+      for (const nodeNetwork of props.remoteNodeNetworks!) {
+        for (const podNetwork of props.remotePodNetworks) {
+          const [overlap, remoteNodeCidr, remotePodCidr] = validateCidrBlocksOverlap(nodeNetwork.cidrs, podNetwork.cidrs);
+          if (overlap) {
+            throw new Error(`Remote node network CIDR block ${remoteNodeCidr} should not overlap with remote pod network CIDR block ${remotePodCidr}`);
+          }
+        }
+      }
+    }
   }
 }
 
@@ -2105,7 +2396,6 @@ export interface BootstrapOptions {
   readonly dockerConfigJson?: string;
 
   /**
-
    * Overrides the IP address to use for DNS queries within the
    * cluster.
    *
@@ -2182,6 +2472,30 @@ export interface AutoScalingGroupOptions {
 }
 
 /**
+ * Network configuration of nodes run on-premises with EKS Hybrid Nodes.
+ */
+export interface RemoteNodeNetwork {
+  /**
+   * Specifies the list of remote node CIDRs.
+   *
+   * @see http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-eks-cluster-remotenodenetwork.html#cfn-eks-cluster-remotenodenetwork-cidrs
+   */
+  readonly cidrs: string[];
+}
+
+/**
+ * Network configuration of pods run on-premises with EKS Hybrid Nodes.
+ */
+export interface RemotePodNetwork {
+  /**
+   * Specifies the list of remote pod CIDRs.
+   *
+   * @see http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-eks-cluster-remotepodnetwork.html#cfn-eks-cluster-remotepodnetwork-cidrs
+   */
+  readonly cidrs: string[];
+}
+
+/**
  * Import a cluster to use in another stack
  */
 class ImportedCluster extends ClusterBase {
@@ -2190,7 +2504,7 @@ class ImportedCluster extends ClusterBase {
   public readonly connections = new ec2.Connections();
   public readonly kubectlRole?: iam.IRole;
   public readonly kubectlLambdaRole?: iam.IRole;
-  public readonly kubectlEnvironment?: { [key: string]: string; } | undefined;
+  public readonly kubectlEnvironment?: { [key: string]: string } | undefined;
   public readonly kubectlSecurityGroup?: ec2.ISecurityGroup | undefined;
   public readonly kubectlPrivateSubnets?: ec2.ISubnet[] | undefined;
   public readonly kubectlLayer?: lambda.ILayerVersion;
@@ -2208,6 +2522,8 @@ class ImportedCluster extends ClusterBase {
 
   constructor(scope: Construct, id: string, private readonly props: ClusterAttributes) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.clusterName = props.clusterName;
     this.clusterArn = this.stack.formatArn(clusterArnComponents(props.clusterName));
@@ -2340,6 +2656,7 @@ export class EksOptimizedImage implements ec2.IMachineImage {
         'amazon-linux-2/' : 'amazon-linux-2-arm64/' : '')
       + (this.nodeType === NodeType.GPU ? 'amazon-linux-2-gpu/' : '')
       + (this.nodeType === NodeType.INFERENTIA ? 'amazon-linux-2-gpu/' : '')
+      + (this.nodeType === NodeType.TRAINIUM ? 'amazon-linux-2-gpu/' : '')
       + 'recommended/image_id';
   }
 
@@ -2377,6 +2694,11 @@ export enum NodeType {
    * Inferentia instances
    */
   INFERENTIA = 'INFERENTIA',
+
+  /**
+   * Trainium instances
+   */
+  TRAINIUM = 'TRAINIUM',
 }
 
 /**
@@ -2438,9 +2760,14 @@ export enum MachineImageType {
 }
 
 function nodeTypeForInstanceType(instanceType: ec2.InstanceType) {
-  return INSTANCE_TYPES.gpu.includes(instanceType.toString().substring(0, 2)) ? NodeType.GPU :
-    INSTANCE_TYPES.inferentia.includes(instanceType.toString().substring(0, 4)) ? NodeType.INFERENTIA :
-      NodeType.STANDARD;
+  if (INSTANCE_TYPES.gpu.includes(instanceType.toString().substring(0, 2))) {
+    return NodeType.GPU;
+  } else if (INSTANCE_TYPES.inferentia.includes(instanceType.toString().substring(0, 4))) {
+    return NodeType.INFERENTIA;
+  } else if (INSTANCE_TYPES.trainium.includes(instanceType.toString().substring(0, 4))) {
+    return NodeType.TRAINIUM;
+  }
+  return NodeType.STANDARD;
 }
 
 function cpuArchForInstanceType(instanceType: ec2.InstanceType) {
@@ -2452,4 +2779,35 @@ function cpuArchForInstanceType(instanceType: ec2.InstanceType) {
 
 function flatten<A>(xss: A[][]): A[] {
   return Array.prototype.concat.call([], ...xss);
+}
+
+function validateCidrBlocksOverlap(cidrBlocks1: string[], cidrBlocks2: string[]): [boolean, string, string] {
+  for (const cidr1 of cidrBlocks1) {
+    for (const cidr2 of cidrBlocks2) {
+      const overlap = validateCidrPairOverlap(cidr1, cidr2);
+      if (overlap) {
+        return [true, cidr1, cidr2];
+      }
+    }
+  }
+
+  return [false, '', ''];
+}
+
+function validateCidrPairOverlap(cidr1: string, cidr2: string): boolean {
+  const cidr1Range = new CidrBlock(cidr1);
+  const cidr1IpRange: [string, string] = [cidr1Range.minIp(), cidr1Range.maxIp()];
+
+  const cidr2Range = new CidrBlock(cidr2);
+  const cidr2IpRange: [string, string] = [cidr2Range.minIp(), cidr2Range.maxIp()];
+
+  return rangesOverlap(cidr1IpRange, cidr2IpRange);
+}
+
+function rangesOverlap(range1: [string, string], range2: [string, string]): boolean {
+  const [start1, end1] = range1;
+  const [start2, end2] = range2;
+
+  // Check if ranges overlap
+  return start1 <= end2 && start2 <= end1;
 }

@@ -1,11 +1,10 @@
-import { Template } from 'aws-cdk-lib/assertions';
+import { Match, Template } from 'aws-cdk-lib/assertions';
 import { App, CustomResource, Stack } from 'aws-cdk-lib';
 import { ActualResult, ExpectedResult, InvocationType, LogType } from '../../lib/assertions';
 import { DeployAssert } from '../../lib/assertions/private/deploy-assert';
 import { IntegTest } from '../../lib/test-case';
 
 describe('DeployAssert', () => {
-
   test('of', () => {
     const app = new App();
     const stack = new Stack(app, 'TestStack');
@@ -50,12 +49,27 @@ describe('DeployAssert', () => {
         service: 'Lambda',
         api: 'invoke',
         parameters: {
-          FunctionName: 'my-func',
-          InvocationType: 'Event',
-          LogType: 'Tail',
-          Payload: '{"key":"val"}',
+          FunctionName: '"my-func"',
+          InvocationType: '"Event"',
+          LogType: '"Tail"',
+          Payload: '"{\\"key\\":\\"val\\"}"',
         },
       });
+    });
+
+    test('multiple identical calls can be configured', () => {
+      // GIVEN
+      const app = new App();
+
+      // WHEN
+      const deployAssert = new DeployAssert(app);
+      deployAssert.invokeFunction({ functionName: 'my-func' });
+      deployAssert.invokeFunction({ functionName: 'my-func' });
+
+      // THEN
+      const template = Template.fromStack(deployAssert.scope);
+      template.resourceCountIs('AWS::Lambda::Function', 1);
+      template.resourceCountIs('Custom::DeployAssert@SdkCallLambdainvoke', 2);
     });
   });
 
@@ -145,6 +159,21 @@ describe('DeployAssert', () => {
       template.resourceCountIs('Custom::DeployAssert@SdkCallMyServiceMyApi2', 1);
     });
 
+    test('multiple identical calls can be configured', () => {
+      // GIVEN
+      const app = new App();
+
+      // WHEN
+      const deployAssert = new DeployAssert(app);
+      deployAssert.awsApiCall('MyService', 'MyApi');
+      deployAssert.awsApiCall('MyService', 'MyApi');
+
+      // THEN
+      const template = Template.fromStack(deployAssert.scope);
+      template.resourceCountIs('AWS::Lambda::Function', 1);
+      template.resourceCountIs('Custom::DeployAssert@SdkCallMyServiceMyApi', 2);
+    });
+
     test('custom resource type length is truncated when greater than 60 characters', () => {
       // GIVEN
       const app = new App();
@@ -161,12 +190,195 @@ describe('DeployAssert', () => {
       template.resourceCountIs('AWS::Lambda::Function', 1);
       template.resourceCountIs(truncatedType, 1);
     });
+
+    test('can use v3 package name and command class name', () => {
+      // GIVEN
+      const app = new App();
+
+      // WHEN
+      const deplossert = new DeployAssert(app);
+      deplossert.awsApiCall('@aws-sdk/client-ssm', 'GetParameterCommand');
+
+      // THEN
+      const template = Template.fromStack(deplossert.scope);
+
+      template.resourceCountIs('AWS::Lambda::Function', 1);
+      template.resourcePropertiesCountIs(
+        'Custom::DeployAssert@SdkCall@aws-sdkclient-ssmGetParameterC',
+        {
+          service: '@aws-sdk/client-ssm',
+          api: 'GetParameterCommand',
+        },
+        1,
+      );
+    });
+
+    test('can use v3 package name and command class name with assertions', () => {
+      // GIVEN
+      const app = new App();
+
+      // WHEN
+      const deplossert = new DeployAssert(app);
+      deplossert.awsApiCall('@aws-sdk/client-ssm', 'GetParameterCommand').expect(
+        ExpectedResult.objectLike({}),
+      );
+
+      // THEN
+      const template = Template.fromStack(deplossert.scope);
+
+      template.resourceCountIs('AWS::Lambda::Function', 1);
+      template.resourcePropertiesCountIs(
+        'Custom::DeployAssert@SdkCall@aws-sdkclient-ssmGetParameterC',
+        {
+          service: '@aws-sdk/client-ssm',
+          api: 'GetParameterCommand',
+        },
+        1,
+      );
+      template.hasOutput('AssertionResultsAwsApiCallawssdkclientssmGetParameterCommand', {
+        Value: {
+          'Fn::GetAtt': ['AwsApiCallawssdkclientssmGetParameterCommand', 'assertion'],
+        },
+      });
+    });
+  });
+
+  describe('httpApiCall', () => {
+    test('default', () => {
+      // GIVEN
+      const app = new App();
+      const deplossert = new DeployAssert(app);
+
+      // WHEN
+      deplossert.httpApiCall('https://example.com/test/123');
+
+      // THEN
+      Template.fromStack(deplossert.scope).templateMatches(Match.objectLike({
+        Resources: Match.objectLike({
+          HttpApiCallexamplecomtest1235ffa3a1b41e83da401e71706d1d9bc9a: {
+            Type: 'Custom::DeployAssert@HttpCallexamplecomtest123',
+            Properties: Match.objectLike({
+              parameters: {
+                url: 'https://example.com/test/123',
+              },
+            }),
+          },
+        }),
+      }));
+    });
+
+    test('expect creates a valid CfnOutput', () => {
+      // GIVEN
+      const app = new App();
+      const deplossert = new DeployAssert(app);
+
+      // WHEN
+      const query = deplossert.httpApiCall('https://example.com/test/123?param=value&param2#hash');
+      query.expect(ExpectedResult.objectLike({ status: 200 }));
+
+      // THEN
+      Template.fromStack(deplossert.scope).hasOutput(
+        // Output name should only contain alphanumeric characters
+        'AssertionResultsHttpApiCallexamplecomtest1237c0018be9f253e38cad30092c2fa2a91',
+        {
+          Value: {
+            'Fn::GetAtt': ['HttpApiCallexamplecomtest1237c0018be9f253e38cad30092c2fa2a91', 'assertion'],
+          },
+        },
+      );
+    });
+
+    test('multiple calls can be configured', () => {
+      // GIVEN
+      const app = new App();
+
+      // WHEN
+      const deplossert = new DeployAssert(app);
+      deplossert.httpApiCall('https://example.com/test/123');
+      deplossert.httpApiCall('https://example.com/test/789');
+
+      // THEN
+      const template = Template.fromStack(deplossert.scope);
+      template.resourceCountIs('AWS::Lambda::Function', 1);
+      template.resourceCountIs('Custom::DeployAssert@HttpCallexamplecomtest123', 1);
+      template.resourceCountIs('Custom::DeployAssert@HttpCallexamplecomtest789', 1);
+    });
+
+    test('multiple identical calls can be configured', () => {
+      // GIVEN
+      const app = new App();
+
+      // WHEN
+      const deployAssert = new DeployAssert(app);
+      deployAssert.httpApiCall('https://example.com/test');
+      deployAssert.httpApiCall('https://example.com/test');
+
+      // THEN
+      const template = Template.fromStack(deployAssert.scope);
+      template.resourceCountIs('AWS::Lambda::Function', 1);
+      template.resourceCountIs('Custom::DeployAssert@HttpCallexamplecomtest', 2);
+    });
+
+    test('call with fetch options', () => {
+      // GIVEN
+      const app = new App();
+
+      // WHEN
+      const deplossert = new DeployAssert(app);
+      deplossert.httpApiCall('https://example.com/test/123', {
+        body: JSON.stringify({ param: 'value' }),
+        headers: {
+          header1: 'value/value1',
+        },
+        method: 'POST',
+        port: 8443,
+      });
+
+      // THEN
+      const template = Template.fromStack(deplossert.scope);
+      template.templateMatches(Match.objectLike({
+        Resources: Match.objectLike({
+          HttpApiCallexamplecomtest1234ed1aca271c61baebedbb58ac2be8cea: {
+            Type: 'Custom::DeployAssert@HttpCallexamplecomtest123',
+            Properties: Match.objectLike({
+              parameters: {
+                url: 'https://example.com/test/123',
+                fetchOptions: {
+                  body: JSON.stringify({ param: 'value' }),
+                  headers: { header1: 'value/value1' },
+                  method: 'POST',
+                  port: 8443,
+                },
+              },
+            }),
+          },
+        }),
+      }));
+      template.resourceCountIs('AWS::Lambda::Function', 1);
+    });
+
+    test('custom resource type length is truncated when greater than 60 characters', () => {
+      // GIVEN
+      const app = new App();
+
+      // WHEN
+      const deplossert = new DeployAssert(app);
+      deplossert.httpApiCall('https://example.com/TheQuickBrownFoxJumpsOverTheLazyDog');
+
+      // THEN
+      const truncatedType = 'Custom::DeployAssert@HttpCallexamplecomTheQuickBrownFoxJumps';
+      expect(truncatedType.length).toEqual(60);
+
+      const template = Template.fromStack(deplossert.scope);
+      template.resourceCountIs('AWS::Lambda::Function', 1);
+      template.resourceCountIs(truncatedType, 1);
+    });
   });
 });
 
 describe('User provided assertions stack', () => {
   test('Same stack for integration test and assertions', () => {
-    //GIVEN
+    // GIVEN
     const app = new App();
     const stack = new Stack(app, 'TestStack');
 
@@ -185,7 +397,7 @@ describe('User provided assertions stack', () => {
   });
 
   test('Different stack for integration test and assertions', () => {
-    //GIVEN
+    // GIVEN
     const app = new App();
     const integStack = new Stack(app, 'TestStack');
     const assertionStack = new Stack(app, 'AssertionsStack');
@@ -206,7 +418,7 @@ describe('User provided assertions stack', () => {
   });
 
   test('not throw when environment matches', () => {
-    //GIVEN
+    // GIVEN
     const app = new App();
     const env = { region: 'us-west-2' };
     const integStack = new Stack(app, 'IntegStack', { env: env });

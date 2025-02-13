@@ -4,7 +4,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as cdk from 'aws-cdk-lib';
-import { Cluster, ClusterParameterGroup, ClusterSubnetGroup, ClusterType } from '../lib';
+import { Cluster, ClusterParameterGroup, ClusterSubnetGroup, ClusterType, NodeType, ResourceAction } from '../lib';
 import { CfnCluster } from 'aws-cdk-lib/aws-redshift';
 
 let stack: cdk.Stack;
@@ -132,8 +132,55 @@ test('creates a secret when master credentials are not specified', () => {
   });
 });
 
-describe('node count', () => {
+test('creates a secret with a custom excludeCharacters', () => {
+  // WHEN
+  new Cluster(stack, 'Redshift', {
+    masterUser: {
+      masterUsername: 'admin',
+      excludeCharacters: '"@/\\\ \'`',
+    },
+    vpc,
+  });
 
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::Redshift::Cluster', {
+    MasterUsername: {
+      'Fn::Join': [
+        '',
+        [
+          '{{resolve:secretsmanager:',
+          {
+            Ref: 'RedshiftSecretA08D42D6',
+          },
+          ':SecretString:username::}}',
+        ],
+      ],
+    },
+    MasterUserPassword: {
+      'Fn::Join': [
+        '',
+        [
+          '{{resolve:secretsmanager:',
+          {
+            Ref: 'RedshiftSecretA08D42D6',
+          },
+          ':SecretString:password::}}',
+        ],
+      ],
+    },
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::SecretsManager::Secret', {
+    GenerateSecretString: {
+      ExcludeCharacters: '"@/\\\ \'`',
+      GenerateStringKey: 'password',
+      PasswordLength: 30,
+      SecretStringTemplate: '{"username":"admin"}',
+    },
+  });
+});
+
+describe('node count', () => {
   test('Single Node Clusters do not define node count', () => {
     // WHEN
     new Cluster(stack, 'Redshift', {
@@ -276,11 +323,9 @@ describe('parameter group', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::Redshift::Cluster', {
       ClusterParameterGroupName: { Ref: 'ParamsA8366201' },
     });
-
   });
 
   test('Adding to the cluster parameter group on a cluster not instantiated with a parameter group', () => {
-
     // WHEN
     const cluster = new Cluster(stack, 'Redshift', {
       clusterName: 'foobar',
@@ -310,7 +355,6 @@ describe('parameter group', () => {
   });
 
   test('Adding to the cluster parameter group on a cluster instantiated with a parameter group', () => {
-
     // WHEN
     const group = new ClusterParameterGroup(stack, 'Params', {
       description: 'lorem ipsum',
@@ -363,9 +407,8 @@ describe('parameter group', () => {
     // WHEN
     expect(() => cluster.addToParameterGroup('param', 'value2'))
       // THEN
-      .toThrowError('Cannot add a parameter to an imported parameter group');
+      .toThrow('Cannot add a parameter to an imported parameter group');
   });
-
 });
 
 test('publicly accessible cluster', () => {
@@ -382,6 +425,39 @@ test('publicly accessible cluster', () => {
   Template.fromStack(stack).hasResourceProperties('AWS::Redshift::Cluster', {
     PubliclyAccessible: true,
   });
+});
+
+test('availability zone relocation enabled', () => {
+  // WHEN
+  new Cluster(stack, 'Redshift', {
+    masterUser: {
+      masterUsername: 'admin',
+    },
+    vpc,
+    availabilityZoneRelocation: true,
+    nodeType: NodeType.RA3_XLPLUS,
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::Redshift::Cluster', {
+    AvailabilityZoneRelocation: true,
+  });
+});
+
+test.each([
+  NodeType.DC1_8XLARGE,
+  NodeType.DC2_LARGE,
+])('throw error when availability zone relocation is enabled for invalid node type %s', (nodeType) => {
+  expect(() => {
+    new Cluster(stack, 'Redshift', {
+      masterUser: {
+        masterUsername: 'admin',
+      },
+      vpc,
+      availabilityZoneRelocation: true,
+      nodeType,
+    });
+  }).toThrow(`Availability zone relocation is supported for only RA3 node types, got: ${nodeType}`);
 });
 
 test('imported cluster with imported security group honors allowAllOutbound', () => {
@@ -431,6 +507,36 @@ test('can create a cluster with logging enabled', () => {
   });
 });
 
+test.each([
+  ResourceAction.PAUSE_CLUSTER,
+  ResourceAction.RESUME_CLUSTER,
+  ResourceAction.FAILOVER_PRIMARY_COMPUTE,
+])('specify resource action %s', (resourceAction) => {
+  // WHEN
+  new Cluster(stack, 'Redshift', {
+    masterUser: {
+      masterUsername: 'admin',
+    },
+    vpc,
+    resourceAction,
+    nodeType: NodeType.RA3_XLPLUS,
+    multiAz: true,
+  });
+});
+
+test.each([false, undefined])('throw error for failover primary compute action with single AZ cluster', (multiAz) => {
+  expect(() => {
+    new Cluster(stack, 'Redshift', {
+      masterUser: {
+        masterUsername: 'admin',
+      },
+      vpc,
+      multiAz,
+      resourceAction: ResourceAction.FAILOVER_PRIMARY_COMPUTE,
+    });
+  }).toThrow('ResourceAction.FAILOVER_PRIMARY_COMPUTE can only be used with multi-AZ clusters.');
+});
+
 test('throws when trying to add rotation to a cluster without secret', () => {
   // WHEN
   const cluster = new Cluster(stack, 'Redshift', {
@@ -444,8 +550,7 @@ test('throws when trying to add rotation to a cluster without secret', () => {
   // THEN
   expect(() => {
     cluster.addRotationSingleUser();
-  }).toThrowError();
-
+  }).toThrow();
 });
 
 test('throws validation error when trying to set encryptionKey without enabling encryption', () => {
@@ -465,8 +570,7 @@ test('throws validation error when trying to set encryptionKey without enabling 
   // THEN
   expect(() => {
     new Cluster(stack, 'Redshift', props);
-  }).toThrowError();
-
+  }).toThrow();
 });
 
 test('throws when trying to add single user rotation multiple times', () => {
@@ -484,7 +588,7 @@ test('throws when trying to add single user rotation multiple times', () => {
   // THEN
   expect(() => {
     cluster.addRotationSingleUser();
-  }).toThrowError();
+  }).toThrow();
 });
 
 test('can use existing cluster subnet group', () => {
@@ -614,6 +718,67 @@ test('elastic ip address', () => {
   });
 });
 
+describe('multi AZ cluster', () => {
+  test('create a multi AZ cluster', () => {
+    // WHEN
+    new Cluster(stack, 'Redshift', {
+      masterUser: {
+        masterUsername: 'admin',
+        masterPassword: cdk.SecretValue.unsafePlainText('tooshort'),
+      },
+      vpc,
+      nodeType: NodeType.RA3_LARGE,
+      multiAz: true,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::Redshift::Cluster', {
+      AllowVersionUpgrade: true,
+      MasterUsername: 'admin',
+      MasterUserPassword: 'tooshort',
+      ClusterType: 'multi-node',
+      AutomatedSnapshotRetentionPeriod: 1,
+      Encrypted: true,
+      NumberOfNodes: 2,
+      NodeType: 'ra3.large',
+      DBName: 'default_db',
+      PubliclyAccessible: false,
+      ClusterSubnetGroupName: { Ref: 'RedshiftSubnetsDFE70E0A' },
+      VpcSecurityGroupIds: [
+        { 'Fn::GetAtt': ['RedshiftSecurityGroup796D74A7', 'GroupId'] },
+      ],
+      MultiAZ: true,
+    });
+  });
+
+  test('throw error for invalid node type', () => {
+    expect(() => {
+      new Cluster(stack, 'Redshift', {
+        masterUser: {
+          masterUsername: 'admin',
+        },
+        vpc,
+        nodeType: NodeType.DS2_XLARGE,
+        multiAz: true,
+      });
+    }).toThrow('Multi-AZ cluster is only supported for RA3 node types, got: ds2.xlarge');
+  });
+
+  test('throw error for single node cluster', () => {
+    expect(() => {
+      new Cluster(stack, 'Redshift', {
+        masterUser: {
+          masterUsername: 'admin',
+        },
+        vpc,
+        nodeType: NodeType.RA3_XLPLUS,
+        multiAz: true,
+        clusterType: ClusterType.SINGLE_NODE,
+      });
+    }).toThrow('Multi-AZ cluster is not supported for `clusterType` single-node');
+  });
+});
+
 describe('reboot for Parameter Changes', () => {
   test('throw error for cluster without parameter group', () => {
     // Given
@@ -627,7 +792,7 @@ describe('reboot for Parameter Changes', () => {
     // WHEN
     expect(() => Template.fromStack(stack))
       // THEN
-      .toThrowError(/Cannot enable reboot for parameter changes/);
+      .toThrow(/Cannot enable reboot for parameter changes/);
   });
 
   test('throw error for cluster with imported parameter group', () => {
@@ -643,7 +808,7 @@ describe('reboot for Parameter Changes', () => {
     // WHEN
     expect(() => Template.fromStack(stack))
       // THEN
-      .toThrowError(/Cannot enable reboot for parameter changes/);
+      .toThrow(/Cannot enable reboot for parameter changes/);
   });
 
   test('not throw error when parameter group is created after enabling reboots', () => {
@@ -659,7 +824,7 @@ describe('reboot for Parameter Changes', () => {
     // WHEN
     expect(() => Template.fromStack(stack))
       // THEN
-      .not.toThrowError(/Cannot enable reboot for parameter changes/);
+      .not.toThrow(/Cannot enable reboot for parameter changes/);
   });
 
   test('not create duplicate resources when reboot feature is enabled multiple times on a cluster', () => {
@@ -672,7 +837,7 @@ describe('reboot for Parameter Changes', () => {
       rebootForParameterChanges: true,
     });
     cluster.addToParameterGroup('foo', 'bar');
-    //WHEN
+    // WHEN
     cluster.enableRebootForParameterChanges();
     // THEN
     Template.fromStack(stack).resourceCountIs('Custom::RedshiftClusterRebooter', 1);
@@ -700,7 +865,7 @@ describe('reboot for Parameter Changes', () => {
     cluster.enableRebootForParameterChanges();
     cluster2.enableRebootForParameterChanges();
 
-    //THEN
+    // THEN
     const template = Template.fromStack(stack);
     template.resourceCountIs('Custom::RedshiftClusterRebooter', 2);
     template.templateMatches({
@@ -709,7 +874,7 @@ describe('reboot for Parameter Changes', () => {
           Type: 'AWS::Lambda::Function',
           Properties: {
             Handler: 'index.handler',
-            Runtime: 'nodejs16.x',
+            Runtime: 'nodejs18.x',
             Timeout: 900,
           },
         },
@@ -731,7 +896,7 @@ describe('reboot for Parameter Changes', () => {
     // WHEN
     cluster.addToParameterGroup('lorem', 'ipsum');
 
-    //THEN
+    // THEN
     const template = Template.fromStack(stack);
     template.hasResourceProperties('Custom::RedshiftClusterRebooter', {
       ParametersString: JSON.stringify(
@@ -745,7 +910,6 @@ describe('reboot for Parameter Changes', () => {
 });
 
 describe('default IAM role', () => {
-
   test('Default role not in role list', () => {
     // GIVEN
     const clusterRole1 = new iam.Role(stack, 'clusterRole1', { assumedBy: new iam.ServicePrincipal('redshift.amazonaws.com') });

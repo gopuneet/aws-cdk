@@ -13,6 +13,7 @@ import * as constructs from 'constructs';
 import { addressOf } from 'constructs/lib/private/uniqueid';
 import { KafkaVersion } from './';
 import { CfnCluster } from 'aws-cdk-lib/aws-msk';
+import { addConstructMetadata, MethodMetadata } from 'aws-cdk-lib/core/lib/metadata-resource';
 
 /**
  * Represents a MSK Cluster
@@ -36,7 +37,7 @@ export interface ICluster extends core.IResource, ec2.IConnectable {
 /**
  * A new or imported MSK Cluster.
  */
-abstract class ClusterBase extends core.Resource implements ICluster {
+export abstract class ClusterBase extends core.Resource implements ICluster {
   public abstract readonly clusterArn: string;
   public abstract readonly clusterName: string;
   /** @internal */
@@ -59,21 +60,25 @@ export interface ClusterProps {
    * The physical name of the cluster.
    */
   readonly clusterName: string;
+
   /**
    * The version of Apache Kafka.
    */
   readonly kafkaVersion: KafkaVersion;
+
   /**
    * Number of Apache Kafka brokers deployed in each Availability Zone.
    *
    * @default 1
    */
   readonly numberOfBrokerNodes?: number;
+
   /**
    * Defines the virtual networking environment for this cluster.
    * Must have at least 2 subnets in two different AZs.
    */
   readonly vpc: ec2.IVpc;
+
   /**
    * Where to place the nodes within the VPC.
    * Amazon MSK distributes the broker nodes evenly across the subnets that you specify.
@@ -83,6 +88,7 @@ export interface ClusterProps {
    * @default - the Vpc default strategy if not specified.
    */
   readonly vpcSubnets?: ec2.SubnetSelection;
+
   /**
    * The EC2 instance type that you want Amazon MSK to use when it creates your brokers.
    *
@@ -90,6 +96,7 @@ export interface ClusterProps {
    * @default kafka.m5.large
    */
   readonly instanceType?: ec2.InstanceType;
+
   /**
    * The AWS security groups to associate with the elastic network interfaces in order to specify who can
    * connect to and communicate with the Amazon MSK cluster.
@@ -97,36 +104,50 @@ export interface ClusterProps {
    * @default - create new security group
    */
   readonly securityGroups?: ec2.ISecurityGroup[];
+
   /**
    * Information about storage volumes attached to MSK broker nodes.
    *
    * @default - 1000 GiB EBS volume
    */
   readonly ebsStorageInfo?: EbsStorageInfo;
+
+  /**
+   * This controls storage mode for supported storage tiers.
+   *
+   * @default - StorageMode.LOCAL
+   * @see https://docs.aws.amazon.com/msk/latest/developerguide/msk-tiered-storage.html
+   */
+  readonly storageMode?: StorageMode;
+
   /**
    * The Amazon MSK configuration to use for the cluster.
    *
    * @default - none
    */
   readonly configurationInfo?: ClusterConfigurationInfo;
+
   /**
    * Cluster monitoring configuration.
    *
    * @default - DEFAULT monitoring level
    */
   readonly monitoring?: MonitoringConfiguration;
+
   /**
    * Configure your MSK cluster to send broker logs to different destination types.
    *
    * @default - disabled
    */
   readonly logging?: BrokerLogging;
+
   /**
    * Config details for encryption in transit.
    *
    * @default - enabled
    */
   readonly encryptionInTransit?: EncryptionInTransitConfig;
+
   /**
    * Configuration properties for client authentication.
    * MSK supports using private TLS certificates or SASL/SCRAM to authenticate the identity of clients.
@@ -134,6 +155,7 @@ export interface ClusterProps {
    * @default - disabled
    */
   readonly clientAuthentication?: ClientAuthentication;
+
   /**
    * What to do when this resource is deleted from a stack.
    *
@@ -152,12 +174,28 @@ export interface EbsStorageInfo {
    * @default 1000
    */
   readonly volumeSize?: number;
+
   /**
    * The AWS KMS key for encrypting data at rest.
    *
    * @default Uses AWS managed CMK (aws/kafka)
    */
   readonly encryptionKey?: kms.IKey;
+}
+
+/**
+ * The storage mode for the cluster brokers.
+ */
+export enum StorageMode {
+  /**
+   * Local storage mode utilizes network attached EBS storage.
+   */
+  LOCAL = 'LOCAL',
+
+  /**
+   * Tiered storage mode utilizes EBS storage and Tiered storage.
+   */
+  TIERED = 'TIERED',
 }
 
 /**
@@ -170,6 +208,7 @@ export interface ClusterConfigurationInfo {
    * For example, arn:aws:kafka:us-east-1:123456789012:configuration/example-configuration-name/abcdabcd-1234-abcd-1234-abcd123e8e8e-1.
    */
   readonly arn: string;
+
   /**
    * The revision of the Amazon MSK configuration to use.
    */
@@ -186,14 +225,17 @@ export enum ClusterMonitoringLevel {
    * Default metrics are the essential metrics to monitor.
    */
   DEFAULT = 'DEFAULT',
+
   /**
    * Per Broker metrics give you metrics at the broker level.
    */
   PER_BROKER = 'PER_BROKER',
+
   /**
    * Per Topic Per Broker metrics help you understand volume at the topic level.
    */
   PER_TOPIC_PER_BROKER = 'PER_TOPIC_PER_BROKER',
+
   /**
    * Per Topic Per Partition metrics help you understand consumer group lag at the topic partition level.
    */
@@ -210,12 +252,14 @@ export interface MonitoringConfiguration {
    * @default DEFAULT
    */
   readonly clusterMonitoringLevel?: ClusterMonitoringLevel;
+
   /**
    * Indicates whether you want to enable or disable the JMX Exporter.
    *
    * @default false
    */
   readonly enablePrometheusJmxExporter?: boolean;
+
   /**
    * Indicates whether you want to enable or disable the Prometheus Node Exporter.
    *
@@ -236,12 +280,14 @@ export interface BrokerLogging {
    * @default - disabled
    */
   readonly firehoseDeliveryStreamName?: string;
+
   /**
    * The CloudWatch Logs group that is the destination for broker logs.
    *
    * @default - disabled
    */
   readonly cloudwatchLogGroup?: logs.ILogGroup;
+
   /**
    * Details of the Amazon S3 destination for broker logs.
    *
@@ -258,6 +304,7 @@ export interface S3LoggingConfiguration {
    * The S3 bucket that is the destination for broker logs.
    */
   readonly bucket: s3.IBucket;
+
   /**
    * The S3 prefix that is the destination for broker logs.
    *
@@ -274,10 +321,12 @@ export enum ClientBrokerEncryption {
    * TLS means that client-broker communication is enabled with TLS only.
    */
   TLS = 'TLS',
+
   /**
    * TLS_PLAINTEXT means that client-broker communication is enabled for both TLS-encrypted, as well as plaintext data.
    */
   TLS_PLAINTEXT = 'TLS_PLAINTEXT',
+
   /**
    * PLAINTEXT means that client-broker communication is enabled in plaintext only.
    */
@@ -296,6 +345,7 @@ export interface EncryptionInTransitConfig {
    * @default - TLS
    */
   readonly clientBroker?: ClientBrokerEncryption;
+
   /**
    * Indicates that data communication among the broker nodes of the cluster is encrypted.
    *
@@ -314,12 +364,14 @@ export interface SaslAuthProps {
    * @default false
    */
   readonly scram?: boolean;
+
   /**
    * Enable IAM access control.
    *
    * @default false
    */
   readonly iam?: boolean;
+
   /**
    * KMS Key to encrypt SASL/SCRAM secrets.
    *
@@ -392,11 +444,7 @@ export class Cluster extends ClusterBase {
   /**
    * Reference an existing cluster, defined outside of the CDK code, by name.
    */
-  public static fromClusterArn(
-    scope: constructs.Construct,
-    id: string,
-    clusterArn: string,
-  ): ICluster {
+  public static fromClusterArn(scope: constructs.Construct, id: string, clusterArn: string): ICluster {
     class Import extends ClusterBase {
       public readonly clusterArn = clusterArn;
       public readonly clusterName = core.Fn.select(1, core.Fn.split('/', clusterArn)); // ['arn:partition:kafka:region:account-id', clusterName, clusterId]
@@ -413,9 +461,9 @@ export class Cluster extends ClusterBase {
   private _clusterBootstrapBrokers?: cr.AwsCustomResource;
 
   constructor(scope: constructs.Construct, id: string, props: ClusterProps) {
-    super(scope, id, {
-      physicalName: props.clusterName,
-    });
+    super(scope, id, { physicalName: props.clusterName });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const subnetSelection = props.vpc.selectSubnets(props.vpcSubnets);
 
@@ -429,37 +477,11 @@ export class Cluster extends ClusterBase {
     });
 
     if (subnetSelection.subnets.length < 2) {
-      throw Error(
-        `Cluster requires at least 2 subnets, got ${subnetSelection.subnets.length}`,
-      );
+      throw Error(`Cluster requires at least 2 subnets, got ${subnetSelection.subnets.length}`);
     }
 
-    if (
-      !core.Token.isUnresolved(props.clusterName) &&
-      !/^[a-zA-Z0-9]+$/.test(props.clusterName) &&
-      props.clusterName.length > 64
-    ) {
-      throw Error(
-        'The cluster name must only contain alphanumeric characters and have a maximum length of 64 characters.' +
-          `got: '${props.clusterName}. length: ${props.clusterName.length}'`,
-      );
-    }
-
-    if (
-      props.clientAuthentication?.saslProps?.iam &&
-      props.clientAuthentication?.saslProps?.scram
-    ) {
-      throw Error('Only one client authentication method can be enabled.');
-    }
-
-    if (
-      props.encryptionInTransit?.clientBroker ===
-        ClientBrokerEncryption.PLAINTEXT &&
-      props.clientAuthentication
-    ) {
-      throw Error(
-        'To enable client authentication, you must enabled TLS-encrypted traffic between clients and brokers.',
-      );
+    if (props.encryptionInTransit?.clientBroker === ClientBrokerEncryption.PLAINTEXT && props.clientAuthentication) {
+      throw Error('To enable client authentication, you must enabled TLS-encrypted traffic between clients and brokers.');
     } else if (
       props.encryptionInTransit?.clientBroker ===
         ClientBrokerEncryption.TLS_PLAINTEXT &&
@@ -471,13 +493,10 @@ export class Cluster extends ClusterBase {
       );
     }
 
-    const volumeSize =
-      props.ebsStorageInfo?.volumeSize ?? 1000;
+    const volumeSize = props.ebsStorageInfo?.volumeSize ?? 1000;
     // Minimum: 1 GiB, maximum: 16384 GiB
     if (volumeSize < 1 || volumeSize > 16384) {
-      throw Error(
-        'EBS volume size should be in the range 1-16384',
-      );
+      throw Error('EBS volume size should be in the range 1-16384');
     }
 
     const instanceType = props.instanceType
@@ -485,6 +504,17 @@ export class Cluster extends ClusterBase {
       : this.mskInstanceType(
         ec2.InstanceType.of(ec2.InstanceClass.M5, ec2.InstanceSize.LARGE),
       );
+
+    if (props.storageMode && props.storageMode === StorageMode.TIERED) {
+      if (!props.kafkaVersion.isTieredStorageCompatible()) {
+        throw Error(`To deploy a tiered cluster you must select a compatible Kafka version, got ${props.kafkaVersion.version}`);
+      }
+      if (instanceType === this.mskInstanceType(
+        ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.SMALL),
+      )) {
+        throw Error('Tiered storage doesn\'t support broker type t3.small');
+      }
+    }
 
     const encryptionAtRest = props.ebsStorageInfo?.encryptionKey
       ? {
@@ -588,13 +618,9 @@ export class Cluster extends ClusterBase {
       },
     };
 
-    if (
-      props.clientAuthentication?.saslProps?.scram &&
-      props.clientAuthentication?.saslProps?.key === undefined
-    ) {
+    if (props.clientAuthentication?.saslProps?.scram && props.clientAuthentication?.saslProps?.key === undefined) {
       this.saslScramAuthenticationKey = new kms.Key(this, 'SASLKey', {
-        description:
-          'Used for encrypting MSK secrets for SASL/SCRAM authentication.',
+        description: 'Used for encrypting MSK secrets for SASL/SCRAM authentication.',
         alias: `msk/${props.clusterName}/sasl/scram`,
       });
 
@@ -623,38 +649,17 @@ export class Cluster extends ClusterBase {
       );
     }
 
-    let clientAuthentication;
-    if (props.clientAuthentication?.saslProps?.iam) {
+    let clientAuthentication: CfnCluster.ClientAuthenticationProperty | undefined;
+    if (props.clientAuthentication) {
+      const { saslProps, tlsProps } = props.clientAuthentication;
       clientAuthentication = {
-        sasl: { iam: { enabled: props.clientAuthentication.saslProps.iam } },
-      };
-      if (props.clientAuthentication?.tlsProps) {
-        clientAuthentication = {
-          sasl: { iam: { enabled: props.clientAuthentication.saslProps.iam } },
-          tls: {
-            certificateAuthorityArnList: props.clientAuthentication?.tlsProps?.certificateAuthorities?.map(
-              (ca) => ca.certificateAuthorityArn,
-            ),
-          },
-        };
-      }
-    } else if (props.clientAuthentication?.saslProps?.scram) {
-      clientAuthentication = {
-        sasl: {
-          scram: {
-            enabled: props.clientAuthentication.saslProps.scram,
-          },
-        },
-      };
-    } else if (
-      props.clientAuthentication?.tlsProps?.certificateAuthorities !== undefined
-    ) {
-      clientAuthentication = {
-        tls: {
-          certificateAuthorityArnList: props.clientAuthentication?.tlsProps?.certificateAuthorities.map(
-            (ca) => ca.certificateAuthorityArn,
-          ),
-        },
+        sasl: saslProps ? {
+          iam: saslProps.iam ? { enabled: true }: undefined,
+          scram: saslProps.scram ? { enabled: true }: undefined,
+        } : undefined,
+        tls: tlsProps?.certificateAuthorities ? {
+          certificateAuthorityArnList: tlsProps.certificateAuthorities?.map((ca) => ca.certificateAuthorityArn),
+        } : undefined,
       };
     }
 
@@ -683,8 +688,9 @@ export class Cluster extends ClusterBase {
       configurationInfo: props.configurationInfo,
       enhancedMonitoring: props.monitoring?.clusterMonitoringLevel,
       openMonitoring: openMonitoring,
+      storageMode: props.storageMode,
       loggingInfo: loggingInfo,
-      clientAuthentication: clientAuthentication,
+      clientAuthentication,
     });
 
     this.clusterName = this.getResourceNameAttribute(
@@ -721,6 +727,11 @@ export class Cluster extends ClusterBase {
           physicalResourceId: cr.PhysicalResourceId.of(
             'ZooKeeperConnectionString',
           ),
+          // Limit the output of describeCluster that is otherwise too large
+          outputPaths: [
+            'ClusterInfo.ZookeeperConnectString',
+            'ClusterInfo.ZookeeperConnectStringTls',
+          ],
         },
         policy: cr.AwsCustomResourcePolicy.fromSdkCalls({
           resources: [this.clusterArn],
@@ -780,7 +791,6 @@ export class Cluster extends ClusterBase {
       });
     }
     return this._clusterBootstrapBrokers.getResponseField(responseField);
-
   }
   /**
    * Get the list of brokers that a client application can use to bootstrap
@@ -834,6 +844,7 @@ export class Cluster extends ClusterBase {
    *
    * @param usernames - username(s) to register with the cluster
    */
+  @MethodMetadata()
   public addUser(...usernames: string[]): void {
     if (this.saslScramAuthenticationKey) {
       const MSK_SECRET_PREFIX = 'AmazonMSK_'; // Required

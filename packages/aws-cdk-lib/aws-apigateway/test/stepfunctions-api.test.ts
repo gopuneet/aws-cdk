@@ -1,4 +1,4 @@
-import { Template } from '../../assertions';
+import { Match, Template } from '../../assertions';
 import * as sfn from '../../aws-stepfunctions';
 import { StateMachine, DefinitionBody } from '../../aws-stepfunctions';
 import * as cdk from '../../core';
@@ -7,17 +7,17 @@ import { StepFunctionsIntegration } from '../lib';
 
 describe('Step Functions api', () => {
   test('StepFunctionsRestApi defines correct REST API resources', () => {
-    //GIVEN
+    // GIVEN
     const { stack, stateMachine } = givenSetup();
 
-    //WHEN
+    // WHEN
     const api = whenCondition(stack, stateMachine);
 
     expect(() => {
       api.root.addResource('not allowed');
     }).toThrow();
 
-    //THEN
+    // THEN
     Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Method', {
       HttpMethod: 'ANY',
       MethodResponses: getMethodResponse(),
@@ -157,22 +157,38 @@ describe('Step Functions api', () => {
     });
   });
 
+  test('default method responses are not created when useDefaultMethodResponses is false', () => {
+    // GIVEN
+    const { stack, stateMachine } = givenSetup();
+
+    // WHEN
+    new apigw.StepFunctionsRestApi(stack, 'StepFunctionsRestApi', {
+      stateMachine: stateMachine,
+      useDefaultMethodResponses: false,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Method', {
+      HttpMethod: 'ANY',
+      MethodResponses: Match.absent(),
+    });
+  });
+
   test('fails if options.defaultIntegration is set', () => {
-    //GIVEN
+    // GIVEN
     const { stack, stateMachine } = givenSetup();
 
     const httpURL: string = 'https://foo/bar';
 
-    //WHEN & THEN
+    // WHEN & THEN
     expect(() => new apigw.StepFunctionsRestApi(stack, 'StepFunctionsRestApi', {
       stateMachine: stateMachine,
       defaultIntegration: new apigw.HttpIntegration(httpURL),
     })).toThrow(/Cannot specify \"defaultIntegration\" since Step Functions integration is automatically defined/);
-
   });
 
   test('fails if State Machine is not of type EXPRESS', () => {
-    //GIVEN
+    // GIVEN
     const stack = new cdk.Stack();
 
     const passTask = new sfn.Pass(stack, 'passTask', {
@@ -184,7 +200,7 @@ describe('Step Functions api', () => {
       stateMachineType: sfn.StateMachineType.STANDARD,
     });
 
-    //WHEN & THEN
+    // WHEN & THEN
     expect(() => new apigw.StepFunctionsRestApi(stack, 'StepFunctionsRestApi', {
       stateMachine: stateMachine,
     })).toThrow(/State Machine must be of type "EXPRESS". Please use StateMachineType.EXPRESS as the stateMachineType/);

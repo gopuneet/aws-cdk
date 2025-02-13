@@ -3,7 +3,23 @@ import { Protocol, TargetType } from './enums';
 import { Attributes, renderAttributes } from './util';
 import * as ec2 from '../../../aws-ec2';
 import * as cdk from '../../../core';
+import { ValidationError } from '../../../core/lib/errors';
 import { CfnTargetGroup } from '../elasticloadbalancingv2.generated';
+
+/**
+ * The IP address type of targets registered with a target group
+ */
+export enum TargetGroupIpAddressType {
+  /**
+   * IPv4 addresses
+   */
+  IPV4 = 'ipv4',
+
+  /**
+   * IPv6 addresses
+   */
+  IPV6 = 'ipv6',
+}
 
 /**
  * Basic properties of both Application and Network Target Groups
@@ -56,6 +72,21 @@ export interface BaseTargetGroupProps {
    * @default - Determined automatically.
    */
   readonly targetType?: TargetType;
+
+  /**
+   * Indicates whether cross zone load balancing is enabled.
+   *
+   * @default - use load balancer configuration
+   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-elasticloadbalancingv2-targetgroup-targetgroupattribute.html
+   */
+  readonly crossZoneEnabled?: boolean;
+
+  /**
+   * The type of IP addresses of the targets registered with the target group.
+   *
+   * @default undefined - ELB defaults to IPv4
+   */
+  readonly ipAddressType?: TargetGroupIpAddressType;
 }
 
 /**
@@ -76,7 +107,7 @@ export interface HealthCheck {
    * The approximate number of seconds between health checks for an individual target.
    * Must be 5 to 300 seconds
    *
-   * @default 10 seconds if protocol is `GENEVE`, 35 seconds if target type is `lambda`, else 30 seconds
+   * @default - 10 seconds if protocol is `GENEVE`, 35 seconds if target type is `lambda`, else 30 seconds
    */
   readonly interval?: cdk.Duration;
 
@@ -100,18 +131,15 @@ export interface HealthCheck {
    * The TCP protocol is supported for health checks only if the protocol of the target group is TCP, TLS, UDP, or TCP_UDP.
    * The TLS, UDP, and TCP_UDP protocols are not supported for health checks.
    *
-   * @default HTTP for ALBs, TCP for NLBs
+   * @default - HTTP for ALBs, TCP for NLBs
    */
   readonly protocol?: Protocol;
 
   /**
    * The amount of time, in seconds, during which no response from a target means a failed health check.
+   * Must be 2 to 120 seconds.
    *
-   * For Application Load Balancers, the range is 2-60 seconds and the
-   * default is 5 seconds. For Network Load Balancers, this is 10 seconds for
-   * TCP and HTTPS health checks and 6 seconds for HTTP health checks.
-   *
-   * @default Duration.seconds(5) for ALBs, Duration.seconds(10) or Duration.seconds(6) for NLBs
+   * @default - 6 seconds if the protocol is HTTP, 5 seconds if protocol is `GENEVE`, 30 seconds if target type is `lambda`, 10 seconds for TCP, TLS, or HTTPS
    */
   readonly timeout?: cdk.Duration;
 
@@ -120,7 +148,7 @@ export interface HealthCheck {
    *
    * For Application Load Balancers, the default is 5. For Network Load Balancers, the default is 3.
    *
-   * @default 5 for ALBs, 3 for NLBs
+   * @default - 5 for ALBs, 3 for NLBs
    */
   readonly healthyThresholdCount?: number;
 
@@ -128,7 +156,7 @@ export interface HealthCheck {
    * The number of consecutive health check failures required before considering a target unhealthy.
    *
    * For Application Load Balancers, the default is 2. For Network Load
-   * Balancers, this value must be the same as the healthy threshold count.
+   * Balancers, the range is between 2-10 and can be set accordingly.
    *
    * @default 2
    */
@@ -140,7 +168,7 @@ export interface HealthCheck {
    * You can specify values between 0 and 99. You can specify multiple values
    * (for example, "0,1") or a range of values (for example, "0-5").
    *
-   * @default - 12
+   * @default 12
    */
   readonly healthyGrpcCodes?: string;
 
@@ -242,6 +270,10 @@ export abstract class TargetGroupBase extends Construct implements ITargetGroup 
       this.setAttribute('deregistration_delay.timeout_seconds', baseProps.deregistrationDelay.toSeconds().toString());
     }
 
+    if (baseProps.crossZoneEnabled !== undefined) {
+      this.setAttribute('load_balancing.cross_zone.enabled', baseProps.crossZoneEnabled === true ? 'true' : 'false');
+    }
+
     this.healthCheck = baseProps.healthCheck || {};
     this.vpc = baseProps.vpc;
     this.targetType = baseProps.targetType;
@@ -272,6 +304,7 @@ export abstract class TargetGroupBase extends Construct implements ITargetGroup 
           httpCode: this.healthCheck.healthyHttpCodes,
         } : undefined,
       }),
+      ipAddressType: baseProps.ipAddressType,
 
       ...additionalProps,
     });
@@ -283,6 +316,7 @@ export abstract class TargetGroupBase extends Construct implements ITargetGroup 
     this.targetGroupName = this.resource.attrTargetGroupName;
     this.defaultPort = additionalProps.port;
 
+    this.node.addValidation({ validate: () => this.validateHealthCheck() });
     this.node.addValidation({ validate: () => this.validateTargetGroup() });
   }
 
@@ -314,12 +348,12 @@ export abstract class TargetGroupBase extends Construct implements ITargetGroup 
    */
   protected addLoadBalancerTarget(props: LoadBalancerTargetProps) {
     if (this.targetType !== undefined && this.targetType !== props.targetType) {
-      throw new Error(`Already have a of type '${this.targetType}', adding '${props.targetType}'; make all targets the same type.`);
+      throw new ValidationError(`Already have a of type '${this.targetType}', adding '${props.targetType}'; make all targets the same type.`, this);
     }
     this.targetType = props.targetType;
 
     if (this.targetType === TargetType.LAMBDA && this.targetsJson.length >= 1) {
-      throw new Error('TargetGroup can only contain one LAMBDA target. Create a new TargetGroup.');
+      throw new ValidationError('TargetGroup can only contain one LAMBDA target. Create a new TargetGroup.', this);
     }
 
     if (props.targetJson) {
@@ -331,7 +365,7 @@ export abstract class TargetGroupBase extends Construct implements ITargetGroup 
     const ret = new Array<string>();
 
     if (this.targetType === undefined && this.targetsJson.length === 0) {
-      cdk.Annotations.of(this).addWarning("When creating an empty TargetGroup, you should specify a 'targetType' (this warning may become an error in the future).");
+      cdk.Annotations.of(this).addWarningV2('@aws-cdk/aws-elbv2:targetGroupSpecifyTargetTypeForEmptyTargetGroup', "When creating an empty TargetGroup, you should specify a 'targetType' (this warning may become an error in the future).");
     }
 
     if (this.targetType !== TargetType.LAMBDA && this.vpc === undefined) {
@@ -352,6 +386,22 @@ export abstract class TargetGroupBase extends Construct implements ITargetGroup 
       }
     }
 
+    return ret;
+  }
+
+  protected validateHealthCheck(): string[] {
+    const ret = new Array<string>();
+
+    const intervalSeconds = this.healthCheck.interval?.toSeconds();
+    const timeoutSeconds = this.healthCheck.timeout?.toSeconds();
+
+    if (intervalSeconds && timeoutSeconds) {
+      if (intervalSeconds < timeoutSeconds) {
+        // < instead of <= for backwards compatibility, see discussion in https://github.com/aws/aws-cdk/pull/26031
+        ret.push('Health check interval must be greater than or equal to the timeout; received interval ' +
+        `${intervalSeconds}, timeout ${timeoutSeconds}.`);
+      }
+    }
     return ret;
   }
 }

@@ -1,8 +1,8 @@
 import { testDeprecated } from '@aws-cdk/cdk-build-tools';
 import { Construct } from 'constructs';
 import { Template, Match, Annotations } from '../../assertions';
-import { Duration, Stack, App, CfnResource, RemovalPolicy, Lazy, Stage, DefaultStackSynthesizer, CliCredentialsStackSynthesizer, PERMISSIONS_BOUNDARY_CONTEXT_KEY, PermissionsBoundary } from '../../core';
-import { AnyPrincipal, ArnPrincipal, CompositePrincipal, FederatedPrincipal, ManagedPolicy, PolicyStatement, Role, ServicePrincipal, User, Policy, PolicyDocument, Effect } from '../lib';
+import { Duration, Stack, App, CfnResource, RemovalPolicy, Lazy, Stage, DefaultStackSynthesizer, CliCredentialsStackSynthesizer, PERMISSIONS_BOUNDARY_CONTEXT_KEY, PermissionsBoundary, Token } from '../../core';
+import { AccountPrincipal, AnyPrincipal, ArnPrincipal, CompositePrincipal, FederatedPrincipal, ManagedPolicy, PolicyStatement, Role, ServicePrincipal, User, Policy, PolicyDocument, Effect } from '../lib';
 
 describe('isRole() returns', () => {
   test('true if given Role instance', () => {
@@ -249,7 +249,7 @@ describe('customizeRoles', () => {
     // THEN
     expect(() => {
       role.applyRemovalPolicy(RemovalPolicy.DESTROY);
-    }).toThrow(/Cannot apply RemovalPolicy/);
+    }).not.toThrow(/Cannot apply RemovalPolicy/);
     expect(() => {
       new CfnResource(stack, 'MyResource2', {
         type: 'AWS::Custom',
@@ -388,6 +388,36 @@ describe('IAM role', () => {
     });
   });
 
+  test('a role cannot grant AssumeRole permission to a Service Principal', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    const user = new User(stack, 'User');
+    const role = new Role(stack, 'MyRole', {
+      assumedBy: user,
+    });
+
+    // THEN
+    expect(() => role.grantAssumeRole(new ServicePrincipal('beep-boop.amazonaws.com')))
+      .toThrow('Cannot use a service or account principal with grantAssumeRole, use assumeRolePolicy instead.');
+  });
+
+  test('a role cannot grant AssumeRole permission to an Account Principal', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    const user = new User(stack, 'User');
+    const role = new Role(stack, 'MyRole', {
+      assumedBy: user,
+    });
+
+    // THEN
+    expect(() => role.grantAssumeRole(new AccountPrincipal('123456789')))
+      .toThrow('Cannot use a service or account principal with grantAssumeRole, use assumeRolePolicy instead.');
+  });
+
   testDeprecated('can supply externalId', () => {
     // GIVEN
     const stack = new Stack();
@@ -500,7 +530,6 @@ describe('IAM role', () => {
         },
       ],
     });
-
   });
 
   test('managed policy arns can be supplied upon initialization and also added later', () => {
@@ -535,7 +564,6 @@ describe('IAM role', () => {
          },
       },
     });
-
   });
 
   test('federated principal can change AssumeRoleAction', () => {
@@ -579,7 +607,7 @@ describe('IAM role', () => {
 
     const assumedBy = new ServicePrincipal('bla');
 
-    expect(() => new Role(stack, 'MyRole', { assumedBy, path: '/' })).not.toThrowError();
+    expect(() => new Role(stack, 'MyRole', { assumedBy, path: '/' })).not.toThrow();
   });
 
   test('role path cannot be empty', () => {
@@ -631,7 +659,6 @@ describe('IAM role', () => {
   });
 
   describe('maxSessionDuration', () => {
-
     test('is not specified by default', () => {
       const stack = new Stack();
       new Role(stack, 'MyRole', { assumedBy: new ServicePrincipal('sns.amazonaws.com') });
@@ -1153,7 +1180,6 @@ describe('permissions boundary', () => {
       },
     });
   });
-
 });
 
 test('managed policy ARNs are deduplicated', () => {
@@ -1324,4 +1350,84 @@ test('cross-env role ARNs include path', () => {
       ],
     },
   });
+});
+
+test('doesn\'t throw with roleName of 64 chars', () => {
+  const app = new App();
+  const stack = new Stack(app, 'MyStack');
+  const valdName = 'a'.repeat(64);
+
+  expect(() => {
+    new Role(stack, 'Test', {
+      assumedBy: new ServicePrincipal('sns.amazonaws.com'),
+      roleName: valdName,
+    });
+  }).not.toThrow('Invalid roleName');
+});
+
+test('throws with roleName over 64 chars', () => {
+  const app = new App();
+  const stack = new Stack(app, 'MyStack');
+  const longName = 'a'.repeat(65);
+
+  expect(() => {
+    new Role(stack, 'Test', {
+      assumedBy: new ServicePrincipal('sns.amazonaws.com'),
+      roleName: longName,
+    });
+  }).toThrow('Invalid roleName');
+});
+
+describe('roleName validation', () => {
+  const app = new App();
+  const stack = new Stack(app, 'MyStack');
+  const invalidChars = '!#$%^&*()';
+
+  it('rejects names with spaces', () => {
+    expect(() => {
+      new Role(stack, 'test spaces', {
+        assumedBy: new ServicePrincipal('sns.amazonaws.com'),
+        roleName: 'invalid name',
+      });
+    }).toThrow('Invalid roleName');
+  });
+
+  invalidChars.split('').forEach(char => {
+    it(`rejects name with ${char}`, () => {
+      expect(() => {
+        new Role(stack, `test ${char}`, {
+          assumedBy: new ServicePrincipal('sns.amazonaws.com'),
+          roleName: `invalid${char}`,
+        });
+      }).toThrow('Invalid roleName');
+    });
+  });
+});
+
+test('roleName validation with Tokens', () =>{
+  const app = new App();
+  const stack = new Stack(app, 'MyStack');
+  const token = Lazy.string({ produce: () => 'token' });
+
+  // Mock isUnresolved to return false
+  jest.spyOn(Token, 'isUnresolved').mockReturnValue(false);
+
+  expect(() => {
+    new Role(stack, 'Valid', {
+      assumedBy: new ServicePrincipal('sns.amazonaws.com'),
+      roleName: token,
+    });
+  }).toThrow('Invalid roleName');
+
+  // Mock isUnresolved to return true
+  jest.spyOn(Token, 'isUnresolved').mockReturnValue(true);
+
+  expect(() => {
+    new Role(stack, 'Invalid', {
+      assumedBy: new ServicePrincipal('sns.amazonaws.com'),
+      roleName: token,
+    });
+  }).not.toThrow('Invalid roleName');
+
+  jest.clearAllMocks();
 });

@@ -1,6 +1,7 @@
 import { Construct } from 'constructs';
 import { CfnOriginRequestPolicy } from './cloudfront.generated';
 import { Names, Resource, Token } from '../../core';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
 
 /**
  * Represents a Origin Request Policy
@@ -55,7 +56,6 @@ export interface OriginRequestPolicyProps {
  * @resource AWS::CloudFront::OriginRequestPolicy
  */
 export class OriginRequestPolicy extends Resource implements IOriginRequestPolicy {
-
   /** This policy includes only the User-Agent and Referer headers. It doesn’t include any query strings or cookies. */
   public static readonly USER_AGENT_REFERER_HEADERS = OriginRequestPolicy.fromManagedOriginRequestPolicy('acba4595-bd28-49b8-b9fe-13317c0390fa');
   /** This policy includes the header that enables cross-origin resource sharing (CORS) requests when the origin is a custom origin. */
@@ -91,6 +91,8 @@ export class OriginRequestPolicy extends Resource implements IOriginRequestPolic
     super(scope, id, {
       physicalName: props.originRequestPolicyName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const originRequestPolicyName = props.originRequestPolicyName ?? Names.uniqueId(this);
     if (!Token.isUnresolved(originRequestPolicyName) && !originRequestPolicyName.match(/^[\w-]+$/i)) {
@@ -137,6 +139,14 @@ export class OriginRequestCookieBehavior {
 
   /** All cookies in viewer requests are included in requests that CloudFront sends to the origin. */
   public static all() { return new OriginRequestCookieBehavior('all'); }
+
+  /** All cookies except the provided `cookies` are included in requests that CloudFront sends to the origin. */
+  public static denyList(...cookies: string[]) {
+    if (cookies.length === 0) {
+      throw new Error('At least one cookie to deny must be provided');
+    }
+    return new OriginRequestCookieBehavior('allExcept', cookies);
+  }
 
   /** Only the provided `cookies` are included in requests that CloudFront sends to the origin. */
   public static allowList(...cookies: string[]) {
@@ -194,6 +204,14 @@ export class OriginRequestHeaderBehavior {
     return new OriginRequestHeaderBehavior('whitelist', headers);
   }
 
+  /** All headers except the provided `headers` are included in requests that CloudFront sends to the origin. */
+  public static denyList(...headers: string[]) {
+    if (headers.length === 0) {
+      throw new Error('At least one header to deny must be provided');
+    }
+    return new OriginRequestHeaderBehavior('allExcept', headers);
+  }
+
   /** The behavior of headers: allow all, none or an allow list. */
   public readonly behavior: string;
   /** The headers for the allow list or the included CloudFront headers, if applicable. */
@@ -225,6 +243,14 @@ export class OriginRequestQueryStringBehavior {
       throw new Error('At least one query string to allow must be provided');
     }
     return new OriginRequestQueryStringBehavior('whitelist', queryStrings);
+  }
+
+  /** All query strings except the provided `queryStrings` are included in requests that CloudFront sends to the origin. */
+  public static denyList(...queryStrings: string[]) {
+    if (queryStrings.length === 0) {
+      throw new Error('At least one query string to deny must be provided');
+    }
+    return new OriginRequestQueryStringBehavior('allExcept', queryStrings);
   }
 
   /** The behavior of query strings -- allow all, none, or only an allow list. */

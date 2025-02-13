@@ -7,7 +7,8 @@ import { Policy } from './policy';
 import { PolicyStatement } from './policy-statement';
 import { AddToPrincipalPolicyResult, ArnPrincipal, IPrincipal, PrincipalPolicyFragment } from './principals';
 import { AttachedPolicies, undefinedIfEmpty } from './private/util';
-import { Arn, Aws, Lazy, Resource, SecretValue, Stack } from '../../core';
+import { Arn, ArnFormat, Lazy, Resource, SecretValue, Stack } from '../../core';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
 
 /**
  * Represents an IAM user
@@ -180,7 +181,7 @@ export class User extends Resource implements IIdentity, IUser {
   public static fromUserAttributes(scope: Construct, id: string, attrs: UserAttributes): IUser {
     class Import extends Resource implements IUser {
       public readonly grantPrincipal: IPrincipal = this;
-      public readonly principalAccount = Aws.ACCOUNT_ID;
+      public readonly principalAccount = Stack.of(scope).splitArn(attrs.userArn, ArnFormat.SLASH_RESOURCE_NAME).account;
       // Resource name with path can have multiple elements separated by slash.
       // Therefore, use element after last slash as userName. Happens to work for Tokens since
       // they don't have a '/' in them.
@@ -258,6 +259,8 @@ export class User extends Resource implements IIdentity, IUser {
     super(scope, id, {
       physicalName: props.userName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.managedPolicies.push(...props.managedPolicies || []);
     this.permissionsBoundary = props.permissionsBoundary;
@@ -290,6 +293,7 @@ export class User extends Resource implements IIdentity, IUser {
   /**
    * Adds this user to a group.
    */
+  @MethodMetadata()
   public addToGroup(group: IGroup) {
     this.groups.push(group.groupName);
   }
@@ -298,6 +302,7 @@ export class User extends Resource implements IIdentity, IUser {
    * Attaches a managed policy to the user.
    * @param policy The managed policy to attach.
    */
+  @MethodMetadata()
   public addManagedPolicy(policy: IManagedPolicy) {
     if (this.managedPolicies.find(mp => mp === policy)) { return; }
     this.managedPolicies.push(policy);
@@ -306,6 +311,7 @@ export class User extends Resource implements IIdentity, IUser {
   /**
    * Attaches a policy to this user.
    */
+  @MethodMetadata()
   public attachInlinePolicy(policy: Policy) {
     this.attachedPolicies.attach(policy);
     policy.attachToUser(this);
@@ -316,6 +322,7 @@ export class User extends Resource implements IIdentity, IUser {
    *
    * @returns true
    */
+  @MethodMetadata()
   public addToPrincipalPolicy(statement: PolicyStatement): AddToPrincipalPolicyResult {
     if (!this.defaultPolicy) {
       this.defaultPolicy = new Policy(this, 'DefaultPolicy');
@@ -326,6 +333,7 @@ export class User extends Resource implements IIdentity, IUser {
     return { statementAdded: true, policyDependable: this.defaultPolicy };
   }
 
+  @MethodMetadata()
   public addToPolicy(statement: PolicyStatement): boolean {
     return this.addToPrincipalPolicy(statement).statementAdded;
   }

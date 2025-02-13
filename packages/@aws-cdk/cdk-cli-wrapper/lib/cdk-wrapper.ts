@@ -1,5 +1,6 @@
-import { DefaultCdkOptions, DeployOptions, DestroyOptions, SynthOptions, ListOptions, StackActivityProgress } from './commands';
-import { exec } from './utils';
+import { ChildProcess } from 'child_process';
+import { DefaultCdkOptions, DeployOptions, DestroyOptions, SynthOptions, ListOptions, StackActivityProgress, HotswapMode } from './commands';
+import { exec, watch } from './utils';
 
 /**
  * AWS CDK CLI operations
@@ -30,6 +31,11 @@ export interface ICdk {
    * cdk synth fast
    */
   synthFast(options: SynthFastOptions): void;
+
+  /**
+   * cdk watch
+   */
+  watch(options: DeployOptions): ChildProcess;
 }
 
 /**
@@ -51,14 +57,14 @@ export interface SynthFastOptions {
    *
    * @default cdk.out
    */
-  readonly output?: string,
+  readonly output?: string;
 
   /**
    * Additional context
    *
    * @default - no additional context
    */
-  readonly context?: Record<string, string>,
+  readonly context?: Record<string, string>;
 
   /**
    * Additional environment variables to set in the
@@ -66,7 +72,7 @@ export interface SynthFastOptions {
    *
    * @default - no additional env
    */
-  readonly env?: { [name: string]: string; },
+  readonly env?: { [name: string]: string };
 }
 
 /**
@@ -80,7 +86,7 @@ export interface Environment {
    *
    * @jsii ignore
    */
-  [key: string]: string | undefined
+  [key: string]: string | undefined;
 }
 
 /**
@@ -91,7 +97,7 @@ export interface CdkCliWrapperOptions {
   /**
    * The directory to run the cdk commands from
    */
-  readonly directory: string,
+  readonly directory: string;
 
   /**
    * Additional environment variables to set
@@ -100,7 +106,7 @@ export interface CdkCliWrapperOptions {
    *
    * @default - no additional env vars
    */
-  readonly env?: { [name: string]: string },
+  readonly env?: { [name: string]: string };
 
   /**
    * The path to the cdk executable
@@ -123,7 +129,7 @@ export interface CdkCliWrapperOptions {
  */
 export class CdkCliWrapper implements ICdk {
   private readonly directory: string;
-  private readonly env?: { [name: string]: string | undefined; };
+  private readonly env?: { [name: string]: string | undefined };
   private readonly cdk: string;
   private readonly showOutput: boolean;
 
@@ -176,10 +182,55 @@ export class CdkCliWrapper implements ICdk {
       ...options.changeSetName ? ['--change-set-name', options.changeSetName] : [],
       ...options.toolkitStackName ? ['--toolkit-stack-name', options.toolkitStackName] : [],
       ...options.progress ? ['--progress', options.progress] : ['--progress', StackActivityProgress.EVENTS],
+      ...options.deploymentMethod ? ['--method', options.deploymentMethod] : [],
+      ...options.concurrency ? ['--concurrency', options.concurrency.toString()] : [],
       ...this.createDefaultArguments(options),
     ];
 
     exec([this.cdk, 'deploy', ...deployCommandArgs], {
+      cwd: this.directory,
+      verbose: this.showOutput,
+      env: this.env,
+    });
+  }
+
+  public watch(options: DeployOptions): ChildProcess {
+    let hotswap: string;
+    switch (options.hotswap) {
+      case HotswapMode.FALL_BACK:
+        hotswap = '--hotswap-fallback';
+        break;
+      case HotswapMode.HOTSWAP_ONLY:
+        hotswap = '--hotswap';
+        break;
+      default:
+        hotswap = '--hotswap-fallback';
+        break;
+    }
+    const deployCommandArgs: string[] = [
+      '--watch',
+      ...renderBooleanArg('ci', options.ci),
+      ...renderBooleanArg('execute', options.execute),
+      ...renderBooleanArg('exclusively', options.exclusively),
+      ...renderBooleanArg('force', options.force),
+      ...renderBooleanArg('previous-parameters', options.usePreviousParameters),
+      ...renderBooleanArg('rollback', options.rollback),
+      ...renderBooleanArg('staging', options.staging),
+      ...renderBooleanArg('logs', options.traceLogs),
+      hotswap,
+      ...options.reuseAssets ? renderArrayArg('--reuse-assets', options.reuseAssets) : [],
+      ...options.notificationArns ? renderArrayArg('--notification-arns', options.notificationArns) : [],
+      ...options.parameters ? renderMapArrayArg('--parameters', options.parameters) : [],
+      ...options.outputsFile ? ['--outputs-file', options.outputsFile] : [],
+      ...options.requireApproval ? ['--require-approval', options.requireApproval] : [],
+      ...options.changeSetName ? ['--change-set-name', options.changeSetName] : [],
+      ...options.toolkitStackName ? ['--toolkit-stack-name', options.toolkitStackName] : [],
+      ...options.progress ? ['--progress', options.progress] : ['--progress', StackActivityProgress.EVENTS],
+      ...options.deploymentMethod ? ['--method', options.deploymentMethod] : [],
+      ...this.createDefaultArguments(options),
+    ];
+
+    return watch([this.cdk, 'deploy', ...deployCommandArgs], {
       cwd: this.directory,
       verbose: this.showOutput,
       env: this.env,

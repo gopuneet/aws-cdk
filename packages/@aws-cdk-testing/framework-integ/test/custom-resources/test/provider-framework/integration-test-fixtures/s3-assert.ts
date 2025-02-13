@@ -31,7 +31,6 @@ export interface S3AssertProps {
  * Code is written in Python because why not.
  */
 export class S3Assert extends Construct {
-
   constructor(scope: Construct, id: string, props: S3AssertProps) {
     super(scope, id);
 
@@ -48,7 +47,6 @@ export class S3Assert extends Construct {
 }
 
 class S3AssertProvider extends Construct {
-
   /**
    * Returns the singleton provider.
    */
@@ -66,13 +64,13 @@ class S3AssertProvider extends Construct {
 
     const onEvent = new lambda.Function(this, 's3assert-on-event', {
       code: lambda.Code.fromAsset(path.join(__dirname, 's3-assert-handler')),
-      runtime: lambda.Runtime.PYTHON_3_7,
+      runtime: lambda.Runtime.PYTHON_3_10,
       handler: 'index.on_event',
     });
 
     const isComplete = new lambda.Function(this, 's3assert-is-complete', {
       code: lambda.Code.fromAsset(path.join(__dirname, 's3-assert-handler')),
-      runtime: lambda.Runtime.PYTHON_3_7,
+      runtime: lambda.Runtime.PYTHON_3_10,
       handler: 'index.is_complete',
       initialPolicy: [
         new iam.PolicyStatement({

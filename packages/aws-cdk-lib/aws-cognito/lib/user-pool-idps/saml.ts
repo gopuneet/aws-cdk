@@ -2,6 +2,8 @@ import { Construct } from 'constructs';
 import { UserPoolIdentityProviderProps } from './base';
 import { UserPoolIdentityProviderBase } from './private/user-pool-idp-base';
 import { Names, Token } from '../../../core';
+import { ValidationError } from '../../../core/lib/errors';
+import { addConstructMetadata } from '../../../core/lib/metadata-resource';
 import { CfnUserPoolIdentityProvider } from '../cognito.generated';
 
 /**
@@ -22,7 +24,7 @@ export interface UserPoolIdentityProviderSamlProps extends UserPoolIdentityProvi
    *
    * @default - no identifiers used
    */
-  readonly identifiers?: string[]
+  readonly identifiers?: string[];
 
   /**
    * The SAML metadata.
@@ -35,6 +37,41 @@ export interface UserPoolIdentityProviderSamlProps extends UserPoolIdentityProvi
    * @default - false
    */
   readonly idpSignout?: boolean;
+
+  /**
+   * Whether to require encrypted SAML assertions from IdP.
+   *
+   * @see https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-SAML-signing-encryption.html#cognito-user-pools-SAML-encryption
+   *
+   * @default false
+   */
+  readonly encryptedResponses?: boolean;
+
+  /**
+   * The signing algorithm for SAML requests.
+   *
+   * @see https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-SAML-signing-encryption.html#cognito-user-pools-SAML-signing
+   *
+   * @default - don't sign requests
+   */
+  readonly requestSigningAlgorithm?: SigningAlgorithm;
+
+  /**
+   * Whether to enable IdP-initiated SAML auth flows.
+   *
+   * @default false
+   */
+  readonly idpInitiated?: boolean;
+}
+
+/**
+ * Signing algorithms for SAML requests.
+ */
+export enum SigningAlgorithm {
+  /**
+   * RSA with SHA-256.
+   */
+  RSA_SHA256 = 'rsa-sha256',
 }
 
 /**
@@ -52,7 +89,6 @@ export enum UserPoolIdentityProviderSamlMetadataType {
  * Metadata for a SAML user pool identity provider.
  */
 export class UserPoolIdentityProviderSamlMetadata {
-
   /**
    * Specify SAML metadata via a URL.
    */
@@ -78,7 +114,7 @@ export class UserPoolIdentityProviderSamlMetadata {
 }
 
 /**
- * Represents a identity provider that integrates with SAML.
+ * Represents an identity provider that integrates with SAML.
  * @resource AWS::Cognito::UserPoolIdentityProvider
  */
 export class UserPoolIdentityProviderSaml extends UserPoolIdentityProviderBase {
@@ -86,6 +122,8 @@ export class UserPoolIdentityProviderSaml extends UserPoolIdentityProviderBase {
 
   constructor(scope: Construct, id: string, props: UserPoolIdentityProviderSamlProps) {
     super(scope, id, props);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.validateName(props.name);
 
@@ -99,6 +137,9 @@ export class UserPoolIdentityProviderSaml extends UserPoolIdentityProviderBase {
         IDPSignout: props.idpSignout ?? false,
         MetadataURL: metadataType === UserPoolIdentityProviderSamlMetadataType.URL ? metadataContent : undefined,
         MetadataFile: metadataType === UserPoolIdentityProviderSamlMetadataType.FILE ? metadataContent : undefined,
+        EncryptedResponses: props.encryptedResponses ?? undefined,
+        RequestSigningAlgorithm: props.requestSigningAlgorithm,
+        IDPInit: props.idpInitiated ?? undefined,
       },
       idpIdentifiers: props.identifiers,
       attributeMapping: super.configureAttributeMapping(),
@@ -126,7 +167,7 @@ export class UserPoolIdentityProviderSaml extends UserPoolIdentityProviderBase {
 
   private validateName(name?: string) {
     if (name && !Token.isUnresolved(name) && (name.length < 3 || name.length > 32)) {
-      throw new Error(`Expected provider name to be between 3 and 32 characters, received ${name} (${name.length} characters)`);
+      throw new ValidationError(`Expected provider name to be between 3 and 32 characters, received ${name} (${name.length} characters)`, this);
     }
   }
 }

@@ -83,7 +83,6 @@ export async function writeChangelogs(opts: WriteChangelogOptions): Promise<Chan
 export async function changelog(
   args: ChangelogOptions, currentVersion: string, newVersion: string, commits: ConventionalCommit[],
 ): Promise<string> {
-
   createChangelogIfMissing(args);
 
   // find the position of the last release and remove header
@@ -132,7 +131,7 @@ export async function changelog(
           // (by way of 'standard-version'),
           // which are different than the 'conventionalChangelogWriter' defaults
           ...presetConfig.writerOpts,
-          finalizeContext: (ctx: { noteGroups?: { title: string }[], date?: string }) => {
+          finalizeContext: (ctx: { noteGroups?: { title: string }[]; date?: string }) => {
             // the heading of the "BREAKING CHANGES" section is governed by this Handlebars template:
             // https://github.com/conventional-changelog/conventional-changelog/blob/f1f50f56626099e92efe31d2f8c5477abd90f1b7/packages/conventional-changelog-conventionalcommits/templates/template.hbs#L3-L12
             // to change the heading from 'BREAKING CHANGES' to 'BREAKING CHANGES TO EXPERIMENTAL FEATURES',

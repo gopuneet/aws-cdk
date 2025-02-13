@@ -7,7 +7,6 @@ import { Token } from '../../core';
  * endpoints, EC2 instances, etc.
  */
 export abstract class SubnetFilter {
-
   /**
    * Chooses subnets by id.
    */
@@ -17,21 +16,21 @@ export abstract class SubnetFilter {
 
   /**
    * Chooses subnets which are in one of the given availability zones.
-  */
+   */
   public static availabilityZones(availabilityZones: string[]): SubnetFilter {
     return new AvailabilityZoneSubnetFilter(availabilityZones);
   }
 
   /**
    * Chooses subnets such that there is at most one per availability zone.
-  */
+   */
   public static onePerAz(): SubnetFilter {
     return new OnePerAZSubnetFilter();
   }
 
   /**
    * Chooses subnets which contain any of the specified IP addresses.
-  */
+   */
   public static containsIpAddresses(ipv4addrs: string[]): SubnetFilter {
     return new ContainsIpAddressesSubnetFilter(ipv4addrs);
   }
@@ -41,6 +40,14 @@ export abstract class SubnetFilter {
    */
   public static byCidrMask(mask: number): SubnetFilter {
     return new CidrMaskSubnetFilter(mask);
+  }
+
+  /**
+   * Chooses subnets which are inside any of the specified CIDR range.
+   * @param cidrs List of CIDR ranges to filter subnets from
+   */
+  public static byCidrRanges(cidrs: string[]): SubnetFilter {
+    return new CidrRangesSubnetFilter(cidrs);
   }
 
   /**
@@ -55,7 +62,6 @@ export abstract class SubnetFilter {
  * Chooses subnets which are in one of the given availability zones.
  */
 class AvailabilityZoneSubnetFilter extends SubnetFilter {
-
   private readonly availabilityZones: string[];
 
   constructor(availabilityZones: string[]) {
@@ -75,7 +81,6 @@ class AvailabilityZoneSubnetFilter extends SubnetFilter {
  * Chooses subnets such that there is at most one per availability zone.
  */
 class OnePerAZSubnetFilter extends SubnetFilter {
-
   constructor() {
     super();
   }
@@ -101,7 +106,6 @@ class OnePerAZSubnetFilter extends SubnetFilter {
  * Chooses subnets which contain any of the specified IP addresses.
  */
 class ContainsIpAddressesSubnetFilter extends SubnetFilter {
-
   private readonly ipAddresses: string[];
 
   constructor(ipAddresses: string[]) {
@@ -132,7 +136,6 @@ class ContainsIpAddressesSubnetFilter extends SubnetFilter {
  * Chooses subnets based on the subnetId
  */
 class SubnetIdSubnetFilter extends SubnetFilter {
-
   private readonly subnetIds: string[];
 
   constructor(subnetIds: string[]) {
@@ -152,7 +155,7 @@ class SubnetIdSubnetFilter extends SubnetFilter {
  * Chooses subnets based on the CIDR Netmask
  */
 class CidrMaskSubnetFilter extends SubnetFilter {
-  private readonly mask: number
+  private readonly mask: number;
 
   constructor(mask: number) {
     super();
@@ -166,6 +169,33 @@ class CidrMaskSubnetFilter extends SubnetFilter {
     return subnets.filter(subnet => {
       const subnetCidr = new CidrBlock(subnet.ipv4CidrBlock);
       return subnetCidr.mask === this.mask;
+    });
+  }
+}
+
+/**
+ * Chooses subnets which are inside any of the specified CIDR range.
+ */
+class CidrRangesSubnetFilter extends SubnetFilter {
+  private readonly cidrRanges: string[];
+
+  constructor(cidrRanges: string[]) {
+    super();
+    this.cidrRanges = cidrRanges;
+  }
+
+  /**
+   * Executes the subnet filtering logic.
+   */
+  public selectSubnets(subnets: ISubnet[]): ISubnet[] {
+    return this.checkCidrRanges(subnets, this.cidrRanges);
+  }
+
+  private checkCidrRanges(subnets: ISubnet[], cidrRanges: string[]): ISubnet[] {
+    const cidrs = cidrRanges.map(cidr => new CidrBlock(cidr));
+    return subnets.filter(s => {
+      const subnetCidrBlock = new CidrBlock(s.ipv4CidrBlock);
+      return cidrs.some(cidr => cidr.containsCidr(subnetCidrBlock));
     });
   }
 }

@@ -2,6 +2,7 @@ import { Construct } from 'constructs';
 import * as lambda from '../../aws-lambda';
 import * as sns from '../../aws-sns';
 import * as core from '../../core';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
 
 /**
  * Collection of arbitrary properties
@@ -110,8 +111,8 @@ export interface CustomResourceProps {
    * ```
    *
    * ```ts
-   * import * as cloudformation from '@aws-cdk/aws-cloudformation';
-   * import * as lambda from '@aws-cdk/aws-lambda';
+   * import * as cloudformation from 'aws-cdk-lib/aws-cloudformation';
+   * import * as lambda from 'aws-cdk-lib/aws-lambda';
    * declare const myFunction: lambda.Function;
    *
    * // invoke an AWS Lambda function when a lifecycle event occurs:
@@ -119,8 +120,8 @@ export interface CustomResourceProps {
    * ```
    *
    * ```ts
-   * import * as cloudformation from '@aws-cdk/aws-cloudformation';
-   * import * as sns from '@aws-cdk/aws-sns';
+   * import * as cloudformation from 'aws-cdk-lib/aws-cloudformation';
+   * import * as sns from 'aws-cdk-lib/aws-sns';
    * declare const myTopic: sns.Topic;
    *
    * // publish lifecycle events to an SNS topic:
@@ -180,5 +181,7 @@ export class CustomResource extends core.CustomResource {
       resourceType: props.resourceType,
       serviceToken: core.Lazy.string({ produce: () => props.provider.bind(this).serviceToken }),
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
   }
 }

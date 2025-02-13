@@ -3,8 +3,13 @@ import { ApplicationListener, BaseApplicationListenerProps } from './application
 import { ListenerAction } from './application-listener-action';
 import * as cloudwatch from '../../../aws-cloudwatch';
 import * as ec2 from '../../../aws-ec2';
+import { PolicyStatement } from '../../../aws-iam/lib/policy-statement';
+import { ServicePrincipal } from '../../../aws-iam/lib/principals';
+import * as s3 from '../../../aws-s3';
 import * as cxschema from '../../../cloud-assembly-schema';
-import { Duration, Lazy, Names, Resource } from '../../../core';
+import { CfnResource, Duration, Lazy, Names, Resource, Stack, Token } from '../../../core';
+import { ValidationError } from '../../../core/lib/errors';
+import { addConstructMetadata, MethodMetadata } from '../../../core/lib/metadata-resource';
 import * as cxapi from '../../../cx-api';
 import { ApplicationELBMetrics } from '../elasticloadbalancingv2-canned-metrics.generated';
 import { BaseLoadBalancer, BaseLoadBalancerLookupOptions, BaseLoadBalancerProps, ILoadBalancerV2 } from '../shared/base-load-balancer';
@@ -13,6 +18,8 @@ import { parseLoadBalancerFullName } from '../shared/util';
 
 /**
  * Properties for defining an Application Load Balancer
+ *
+ * @see https://docs.aws.amazon.com/elasticloadbalancing/latest/application/application-load-balancers.html#load-balancer-attributes
  */
 export interface ApplicationLoadBalancerProps extends BaseLoadBalancerProps {
   /**
@@ -25,9 +32,7 @@ export interface ApplicationLoadBalancerProps extends BaseLoadBalancerProps {
   /**
    * The type of IP addresses to use
    *
-   * Only applies to application load balancers.
-   *
-   * @default IpAddressType.Ipv4
+   * @default IpAddressType.IPV4
    */
   readonly ipAddressType?: IpAddressType;
 
@@ -60,6 +65,81 @@ export interface ApplicationLoadBalancerProps extends BaseLoadBalancerProps {
    * @default DesyncMitigationMode.DEFENSIVE
    */
   readonly desyncMitigationMode?: DesyncMitigationMode;
+
+  /**
+   * The client keep alive duration. The valid range is 60 to 604800 seconds (1 minute to 7 days).
+   *
+   * @default - Duration.seconds(3600)
+   */
+  readonly clientKeepAlive?: Duration;
+
+  /**
+   * Indicates whether the Application Load Balancer should preserve the host header in the HTTP request
+   * and send it to the target without any change.
+   *
+   * @default false
+   */
+  readonly preserveHostHeader?: boolean;
+
+  /**
+   * Indicates whether the two headers (x-amzn-tls-version and x-amzn-tls-cipher-suite),
+   * which contain information about the negotiated TLS version and cipher suite,
+   * are added to the client request before sending it to the target.
+   *
+   * The x-amzn-tls-version header has information about the TLS protocol version negotiated with the client,
+   * and the x-amzn-tls-cipher-suite header has information about the cipher suite negotiated with the client.
+   *
+   * Both headers are in OpenSSL format.
+   *
+   * @default false
+   */
+  readonly xAmznTlsVersionAndCipherSuiteHeaders?: boolean;
+
+  /**
+   * Indicates whether the X-Forwarded-For header should preserve the source port
+   * that the client used to connect to the load balancer.
+   *
+   * @default false
+   */
+  readonly preserveXffClientPort?: boolean;
+
+  /**
+   * Enables you to modify, preserve, or remove the X-Forwarded-For header in the HTTP request
+   * before the Application Load Balancer sends the request to the target.
+   *
+   * @default XffHeaderProcessingMode.APPEND
+   */
+  readonly xffHeaderProcessingMode?: XffHeaderProcessingMode;
+
+  /**
+   * Indicates whether to allow a WAF-enabled load balancer to route requests to targets
+   * if it is unable to forward the request to AWS WAF.
+   *
+   * @default false
+   */
+  readonly wafFailOpen?: boolean;
+}
+
+/**
+ * Processing mode of the X-Forwarded-For header in the HTTP request
+ * before the Application Load Balancer sends the request to the target.
+ */
+export enum XffHeaderProcessingMode {
+  /**
+   * Application Load Balancer adds the client IP address (of the last hop) to the X-Forwarded-For header
+   * in the HTTP request before it sends it to targets.
+   */
+  APPEND = 'append',
+  /**
+   * Application Load Balancer preserves the X-Forwarded-For header in the HTTP request,
+   * and sends it to targets without any change.
+   */
+  PRESERVE = 'preserve',
+  /**
+   * Application Load Balancer removes the X-Forwarded-For header
+   * in the HTTP request before it sends it to targets.
+   */
+  REMOVE = 'remove',
 }
 
 /**
@@ -91,7 +171,6 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    */
   public static fromApplicationLoadBalancerAttributes(
     scope: Construct, id: string, attrs: ApplicationLoadBalancerAttributes): IApplicationLoadBalancer {
-
     return new ImportedApplicationLoadBalancer(scope, id, attrs);
   }
 
@@ -106,8 +185,24 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
       securityGroups: Lazy.list({ produce: () => this.connections.securityGroups.map(sg => sg.securityGroupId) }),
       ipAddressType: props.ipAddressType,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
+
+    const minimumCapacityUnit = props.minimumCapacityUnit;
+    if (
+      minimumCapacityUnit &&
+      !Token.isUnresolved(minimumCapacityUnit) &&
+      (!Number.isInteger(minimumCapacityUnit) || minimumCapacityUnit < 100 || minimumCapacityUnit > 1500)
+    ) {
+      throw new ValidationError(`'minimumCapacityUnit' must be a positive integer between 100 and 1500 for Application Load Balancer, got: ${minimumCapacityUnit}.`, this);
+    }
 
     this.ipAddressType = props.ipAddressType ?? IpAddressType.IPV4;
+
+    if (props.ipAddressType === IpAddressType.DUAL_STACK_WITHOUT_PUBLIC_IPV4 && !props.internetFacing) {
+      throw new ValidationError('dual-stack without public IPv4 address can only be used with internet-facing scheme.', this);
+    }
+
     const securityGroups = [props.securityGroup || new ec2.SecurityGroup(this, 'SecurityGroup', {
       vpc: props.vpc,
       description: `Automatically created Security Group for ELB ${Names.uniqueId(this)}`,
@@ -117,15 +212,37 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
     this.listeners = [];
     this.metrics = new ApplicationLoadBalancerMetrics(this, this.loadBalancerFullName);
 
-    if (props.http2Enabled === false) { this.setAttribute('routing.http2.enabled', 'false'); }
+    if (props.http2Enabled !== undefined) { this.setAttribute('routing.http2.enabled', props.http2Enabled ? 'true' : 'false'); }
     if (props.idleTimeout !== undefined) { this.setAttribute('idle_timeout.timeout_seconds', props.idleTimeout.toSeconds().toString()); }
-    if (props.dropInvalidHeaderFields) {this.setAttribute('routing.http.drop_invalid_header_fields.enabled', 'true'); }
-    if (props.desyncMitigationMode !== undefined) {this.setAttribute('routing.http.desync_mitigation_mode', props.desyncMitigationMode); }
+    if (props.dropInvalidHeaderFields) { this.setAttribute('routing.http.drop_invalid_header_fields.enabled', 'true'); }
+    if (props.desyncMitigationMode !== undefined) { this.setAttribute('routing.http.desync_mitigation_mode', props.desyncMitigationMode); }
+    if (props.preserveHostHeader) { this.setAttribute('routing.http.preserve_host_header.enabled', 'true'); }
+    if (props.xAmznTlsVersionAndCipherSuiteHeaders) { this.setAttribute('routing.http.x_amzn_tls_version_and_cipher_suite.enabled', 'true'); }
+    if (props.preserveXffClientPort) { this.setAttribute('routing.http.xff_client_port.enabled', 'true'); }
+    if (props.xffHeaderProcessingMode !== undefined) { this.setAttribute('routing.http.xff_header_processing.mode', props.xffHeaderProcessingMode); }
+    if (props.wafFailOpen) { this.setAttribute('waf.fail_open.enabled', 'true'); }
+    if (props.clientKeepAlive !== undefined) {
+      const clientKeepAliveInMillis = props.clientKeepAlive.toMilliseconds();
+      if (clientKeepAliveInMillis < 1000) {
+        throw new ValidationError(`\'clientKeepAlive\' must be between 60 and 604800 seconds. Got: ${clientKeepAliveInMillis} milliseconds`, this);
+      }
+
+      const clientKeepAliveInSeconds = props.clientKeepAlive.toSeconds();
+      if (clientKeepAliveInSeconds < 60 || clientKeepAliveInSeconds > 604800) {
+        throw new ValidationError(`\'clientKeepAlive\' must be between 60 and 604800 seconds. Got: ${clientKeepAliveInSeconds} seconds`, this);
+      }
+      this.setAttribute('client_keep_alive.seconds', clientKeepAliveInSeconds.toString());
+    }
+
+    if (props.crossZoneEnabled === false) {
+      throw new ValidationError('crossZoneEnabled cannot be false with Application Load Balancers.', this);
+    }
   }
 
   /**
    * Add a new listener to this load balancer
    */
+  @MethodMetadata()
   public addListener(id: string, props: BaseApplicationListenerProps): ApplicationListener {
     const listener = new ApplicationListener(this, id, {
       loadBalancer: this,
@@ -138,6 +255,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
   /**
    * Add a redirection listener to this load balancer
    */
+  @MethodMetadata()
   public addRedirect(props: ApplicationLoadBalancerRedirectConfig = {}): ApplicationListener {
     const sourcePort = props.sourcePort ?? 80;
     const targetPort = (props.targetPort ?? 443).toString();
@@ -154,8 +272,132 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
   }
 
   /**
+   * Enable access logging for this load balancer.
+   *
+   * A region must be specified on the stack containing the load balancer; you cannot enable logging on
+   * environment-agnostic stacks. See https://docs.aws.amazon.com/cdk/latest/guide/environments.html
+   */
+  @MethodMetadata()
+  public logAccessLogs(bucket: s3.IBucket, prefix?: string) {
+    /**
+     * KMS key encryption is not supported on Access Log bucket for ALB, the bucket must use Amazon S3-managed keys (SSE-S3).
+     * See https://docs.aws.amazon.com/elasticloadbalancing/latest/application/enable-access-logging.html#bucket-permissions-troubleshooting
+     */
+
+    if (bucket.encryptionKey) {
+      throw new ValidationError('Encryption key detected. Bucket encryption using KMS keys is unsupported', this);
+    }
+
+    prefix = prefix || '';
+    this.setAttribute('access_logs.s3.enabled', 'true');
+    this.setAttribute('access_logs.s3.bucket', bucket.bucketName.toString());
+    this.setAttribute('access_logs.s3.prefix', prefix);
+
+    const logsDeliveryServicePrincipal = new ServicePrincipal('delivery.logs.amazonaws.com');
+    bucket.addToResourcePolicy(new PolicyStatement({
+      actions: ['s3:PutObject'],
+      principals: [this.resourcePolicyPrincipal()],
+      resources: [
+        bucket.arnForObjects(`${prefix ? prefix + '/' : ''}AWSLogs/${Stack.of(this).account}/*`),
+      ],
+    }));
+    bucket.addToResourcePolicy(
+      new PolicyStatement({
+        actions: ['s3:PutObject'],
+        principals: [logsDeliveryServicePrincipal],
+        resources: [
+          bucket.arnForObjects(`${prefix ? prefix + '/' : ''}AWSLogs/${this.env.account}/*`),
+        ],
+        conditions: {
+          StringEquals: { 's3:x-amz-acl': 'bucket-owner-full-control' },
+        },
+      }),
+    );
+    bucket.addToResourcePolicy(
+      new PolicyStatement({
+        actions: ['s3:GetBucketAcl'],
+        principals: [logsDeliveryServicePrincipal],
+        resources: [bucket.bucketArn],
+      }),
+    );
+
+    // make sure the bucket's policy is created before the ALB (see https://github.com/aws/aws-cdk/issues/1633)
+    // at the L1 level to avoid creating a circular dependency (see https://github.com/aws/aws-cdk/issues/27528
+    // and https://github.com/aws/aws-cdk/issues/27928)
+    const lb = this.node.defaultChild;
+    const bucketPolicy = bucket.policy?.node.defaultChild;
+    if (lb && bucketPolicy && CfnResource.isCfnResource(lb) && CfnResource.isCfnResource(bucketPolicy)) {
+      lb.addDependency(bucketPolicy);
+    }
+  }
+
+  /**
+   * Enable connection logging for this load balancer.
+   *
+   * A region must be specified on the stack containing the load balancer; you cannot enable logging on
+   * environment-agnostic stacks.
+   *
+   * @see https://docs.aws.amazon.com/cdk/latest/guide/environments.html
+   */
+  @MethodMetadata()
+  public logConnectionLogs(bucket: s3.IBucket, prefix?: string) {
+    /**
+     * KMS key encryption is not supported on Connection Log bucket for ALB, the bucket must use Amazon S3-managed keys (SSE-S3).
+     * See https://docs.aws.amazon.com/elasticloadbalancing/latest/application/enable-connection-logging.html#bucket-permissions-troubleshooting-connection
+     */
+    if (bucket.encryptionKey) {
+      throw new ValidationError('Encryption key detected. Bucket encryption using KMS keys is unsupported', this);
+    }
+
+    prefix = prefix || '';
+    this.setAttribute('connection_logs.s3.enabled', 'true');
+    this.setAttribute('connection_logs.s3.bucket', bucket.bucketName.toString());
+    this.setAttribute('connection_logs.s3.prefix', prefix);
+
+    // https://docs.aws.amazon.com/elasticloadbalancing/latest/application/enable-connection-logging.html
+    const logsDeliveryServicePrincipal = new ServicePrincipal('delivery.logs.amazonaws.com');
+    bucket.addToResourcePolicy(new PolicyStatement({
+      actions: ['s3:PutObject'],
+      principals: [this.resourcePolicyPrincipal()],
+      resources: [
+        bucket.arnForObjects(`${prefix ? prefix + '/' : ''}AWSLogs/${Stack.of(this).account}/*`),
+      ],
+    }));
+    // We still need this policy for the bucket using the ACL
+    bucket.addToResourcePolicy(
+      new PolicyStatement({
+        actions: ['s3:PutObject'],
+        principals: [logsDeliveryServicePrincipal],
+        resources: [
+          bucket.arnForObjects(`${prefix ? prefix + '/' : ''}AWSLogs/${Stack.of(this).account}/*`),
+        ],
+        conditions: {
+          StringEquals: { 's3:x-amz-acl': 'bucket-owner-full-control' },
+        },
+      }),
+    );
+    bucket.addToResourcePolicy(
+      new PolicyStatement({
+        actions: ['s3:GetBucketAcl'],
+        principals: [logsDeliveryServicePrincipal],
+        resources: [bucket.bucketArn],
+      }),
+    );
+
+    // make sure the bucket's policy is created before the ALB (see https://github.com/aws/aws-cdk/issues/1633)
+    // at the L1 level to avoid creating a circular dependency (see https://github.com/aws/aws-cdk/issues/27528
+    // and https://github.com/aws/aws-cdk/issues/27928)
+    const lb = this.node.defaultChild;
+    const bucketPolicy = bucket.policy?.node.defaultChild;
+    if (lb && bucketPolicy && CfnResource.isCfnResource(lb) && CfnResource.isCfnResource(bucketPolicy)) {
+      lb.addDependency(bucketPolicy);
+    }
+  }
+
+  /**
    * Add a security group to this load balancer
    */
+  @MethodMetadata()
   public addSecurityGroup(securityGroup: ec2.ISecurityGroup) {
     this.connections.addSecurityGroup(securityGroup);
   }
@@ -166,6 +408,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Average over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.custom`` instead
    */
+  @MethodMetadata()
   public metric(metricName: string, props?: cloudwatch.MetricOptions): cloudwatch.Metric {
     return this.metrics.custom(metricName, props);
   }
@@ -177,6 +420,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.activeConnectionCount`` instead
    */
+  @MethodMetadata()
   public metricActiveConnectionCount(props?: cloudwatch.MetricOptions) {
     return this.metrics.activeConnectionCount(props);
   }
@@ -189,6 +433,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.clientTlsNegotiationErrorCount`` instead
    */
+  @MethodMetadata()
   public metricClientTlsNegotiationErrorCount(props?: cloudwatch.MetricOptions) {
     return this.metrics.clientTlsNegotiationErrorCount(props);
   }
@@ -199,6 +444,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.consumedLCUs`` instead
    */
+  @MethodMetadata()
   public metricConsumedLCUs(props?: cloudwatch.MetricOptions) {
     return this.metrics.consumedLCUs(props);
   }
@@ -209,6 +455,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.httpFixedResponseCount`` instead
    */
+  @MethodMetadata()
   public metricHttpFixedResponseCount(props?: cloudwatch.MetricOptions) {
     return this.metrics.httpFixedResponseCount(props);
   }
@@ -219,6 +466,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.httpRedirectCount`` instead
    */
+  @MethodMetadata()
   public metricHttpRedirectCount(props?: cloudwatch.MetricOptions) {
     return this.metrics.httpRedirectCount(props);
   }
@@ -230,6 +478,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.httpRedirectUrlLimitExceededCount`` instead
    */
+  @MethodMetadata()
   public metricHttpRedirectUrlLimitExceededCount(props?: cloudwatch.MetricOptions) {
     return this.metrics.httpRedirectUrlLimitExceededCount(props);
   }
@@ -242,6 +491,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.httpCodeElb`` instead
    */
+  @MethodMetadata()
   public metricHttpCodeElb(code: HttpCodeElb, props?: cloudwatch.MetricOptions) {
     return this.metrics.httpCodeElb(code, props);
   }
@@ -255,6 +505,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.httpCodeTarget`` instead
    */
+  @MethodMetadata()
   public metricHttpCodeTarget(code: HttpCodeTarget, props?: cloudwatch.MetricOptions) {
     return this.metrics.httpCodeTarget(code, props);
   }
@@ -265,6 +516,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.ipv6ProcessedBytes`` instead
    */
+  @MethodMetadata()
   public metricIpv6ProcessedBytes(props?: cloudwatch.MetricOptions) {
     return this.metrics.ipv6ProcessedBytes(props);
   }
@@ -275,6 +527,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.ipv6RequestCount`` instead
    */
+  @MethodMetadata()
   public metricIpv6RequestCount(props?: cloudwatch.MetricOptions) {
     return this.metrics.ipv6RequestCount(props);
   }
@@ -286,6 +539,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.newConnectionCount`` instead
    */
+  @MethodMetadata()
   public metricNewConnectionCount(props?: cloudwatch.MetricOptions) {
     return this.metrics.newConnectionCount(props);
   }
@@ -296,6 +550,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.processedBytes`` instead
    */
+  @MethodMetadata()
   public metricProcessedBytes(props?: cloudwatch.MetricOptions) {
     return this.metrics.processedBytes(props);
   }
@@ -307,6 +562,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.rejectedConnectionCount`` instead
    */
+  @MethodMetadata()
   public metricRejectedConnectionCount(props?: cloudwatch.MetricOptions) {
     return this.metrics.rejectedConnectionCount(props);
   }
@@ -319,6 +575,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.requestCount`` instead
    */
+  @MethodMetadata()
   public metricRequestCount(props?: cloudwatch.MetricOptions) {
     return this.metrics.requestCount(props);
   }
@@ -329,6 +586,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.ruleEvaluations`` instead
    */
+  @MethodMetadata()
   public metricRuleEvaluations(props?: cloudwatch.MetricOptions) {
     return this.metrics.ruleEvaluations(props);
   }
@@ -339,6 +597,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.targetConnectionErrorCount`` instead
    */
+  @MethodMetadata()
   public metricTargetConnectionErrorCount(props?: cloudwatch.MetricOptions) {
     return this.metrics.targetConnectionErrorCount(props);
   }
@@ -349,6 +608,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Average over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.targetResponseTime`` instead
    */
+  @MethodMetadata()
   public metricTargetResponseTime(props?: cloudwatch.MetricOptions) {
     return this.metrics.targetResponseTime(props);
   }
@@ -361,6 +621,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.targetTLSNegotiationErrorCount`` instead
    */
+  @MethodMetadata()
   public metricTargetTLSNegotiationErrorCount(props?: cloudwatch.MetricOptions) {
     return this.metrics.targetTLSNegotiationErrorCount(props);
   }
@@ -375,6 +636,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.elbAuthError`` instead
    */
+  @MethodMetadata()
   public metricElbAuthError(props?: cloudwatch.MetricOptions) {
     return this.metrics.elbAuthError(props);
   }
@@ -387,6 +649,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Sum over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.elbAuthFailure`` instead
    */
+  @MethodMetadata()
   public metricElbAuthFailure(props?: cloudwatch.MetricOptions) {
     return this.metrics.elbAuthFailure(props);
   }
@@ -399,6 +662,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @default Average over 5 minutes
    * @deprecated Use ``ApplicationLoadBalancer.metrics.elbAuthLatency`` instead
    */
+  @MethodMetadata()
   public metricElbAuthLatency(props?: cloudwatch.MetricOptions) {
     return this.metrics.elbAuthLatency(props);
   }
@@ -413,6 +677,7 @@ export class ApplicationLoadBalancer extends BaseLoadBalancer implements IApplic
    * @deprecated Use ``ApplicationLoadBalancer.metrics.elbAuthSuccess`` instead
    *
    */
+  @MethodMetadata()
   public metricElbAuthSuccess(props?: cloudwatch.MetricOptions) {
     return this.metrics.elbAuthSuccess(props);
   }
@@ -594,6 +859,26 @@ export enum HttpCodeElb {
    * The number of HTTP 5XX server error codes that originate from the load balancer.
    */
   ELB_5XX_COUNT = 'HTTPCode_ELB_5XX_Count',
+
+  /**
+   * The number of HTTP 500 server error codes that originate from the load balancer.
+   */
+  ELB_500_COUNT = 'HTTPCode_ELB_500_Count',
+
+  /**
+   * The number of HTTP 502 server error codes that originate from the load balancer.
+   */
+  ELB_502_COUNT = 'HTTPCode_ELB_502_Count',
+
+  /**
+   * The number of HTTP 503 server error codes that originate from the load balancer.
+   */
+  ELB_503_COUNT = 'HTTPCode_ELB_503_Count',
+
+  /**
+   * The number of HTTP 504 server error codes that originate from the load balancer.
+   */
+  ELB_504_COUNT = 'HTTPCode_ELB_504_Count',
 }
 
 /**
@@ -618,7 +903,7 @@ export enum HttpCodeTarget {
   /**
    * The number of 5xx response codes from targets
    */
-  TARGET_5XX_COUNT = 'HTTPCode_Target_5XX_Count'
+  TARGET_5XX_COUNT = 'HTTPCode_Target_5XX_Count',
 }
 
 /**
@@ -833,6 +1118,15 @@ export interface IApplicationLoadBalancer extends ILoadBalancerV2, ec2.IConnecta
   /**
    * The IP Address Type for this load balancer
    *
+   * If the `@aws-cdk/aws-elasticloadbalancingV2:albDualstackWithoutPublicIpv4SecurityGroupRulesDefault`
+   * feature flag is set (the default for new projects), and `addListener()` is called with `open: true`,
+   * the load balancer's security group will automatically include both IPv4 and IPv6 ingress rules
+   * when using `IpAddressType.DUAL_STACK_WITHOUT_PUBLIC_IPV4`.
+   *
+   * For existing projects that only have IPv4 rules, you can opt-in to IPv6 ingress rules
+   * by enabling the feature flag in your cdk.json file. Note that enabling this feature flag
+   * will modify existing security group rules.
+   *
    * @default IpAddressType.IPV4
    */
   readonly ipAddressType?: IpAddressType;
@@ -931,6 +1225,8 @@ class ImportedApplicationLoadBalancer extends Resource implements IApplicationLo
     super(scope, id, {
       environmentFromArn: props.loadBalancerArn,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.vpc = props.vpc;
     this.loadBalancerArn = props.loadBalancerArn;
@@ -942,6 +1238,7 @@ class ImportedApplicationLoadBalancer extends Resource implements IApplicationLo
     this.metrics = new ApplicationLoadBalancerMetrics(this, parseLoadBalancerFullName(props.loadBalancerArn));
   }
 
+  @MethodMetadata()
   public addListener(id: string, props: BaseApplicationListenerProps): ApplicationListener {
     return new ApplicationListener(this, id, {
       loadBalancer: this,
@@ -952,13 +1249,13 @@ class ImportedApplicationLoadBalancer extends Resource implements IApplicationLo
   public get loadBalancerCanonicalHostedZoneId(): string {
     if (this.props.loadBalancerCanonicalHostedZoneId) { return this.props.loadBalancerCanonicalHostedZoneId; }
     // eslint-disable-next-line max-len
-    throw new Error(`'loadBalancerCanonicalHostedZoneId' was not provided when constructing Application Load Balancer ${this.node.path} from attributes`);
+    throw new ValidationError(`'loadBalancerCanonicalHostedZoneId' was not provided when constructing Application Load Balancer ${this.node.path} from attributes`, this);
   }
 
   public get loadBalancerDnsName(): string {
     if (this.props.loadBalancerDnsName) { return this.props.loadBalancerDnsName; }
     // eslint-disable-next-line max-len
-    throw new Error(`'loadBalancerDnsName' was not provided when constructing Application Load Balancer ${this.node.path} from attributes`);
+    throw new ValidationError(`'loadBalancerDnsName' was not provided when constructing Application Load Balancer ${this.node.path} from attributes`, this);
   }
 }
 
@@ -979,6 +1276,8 @@ class LookedUpApplicationLoadBalancer extends Resource implements IApplicationLo
     super(scope, id, {
       environmentFromArn: props.loadBalancerArn,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.loadBalancerArn = props.loadBalancerArn;
     this.loadBalancerCanonicalHostedZoneId = props.loadBalancerCanonicalHostedZoneId;
@@ -988,6 +1287,8 @@ class LookedUpApplicationLoadBalancer extends Resource implements IApplicationLo
       this.ipAddressType = IpAddressType.IPV4;
     } else if (props.ipAddressType === cxapi.LoadBalancerIpAddressType.DUAL_STACK) {
       this.ipAddressType = IpAddressType.DUAL_STACK;
+    } else if (props.ipAddressType === cxapi.LoadBalancerIpAddressType.DUAL_STACK_WITHOUT_PUBLIC_IPV4) {
+      this.ipAddressType = IpAddressType.DUAL_STACK_WITHOUT_PUBLIC_IPV4;
     }
 
     this.vpc = ec2.Vpc.fromLookup(this, 'Vpc', {
@@ -1002,6 +1303,7 @@ class LookedUpApplicationLoadBalancer extends Resource implements IApplicationLo
     this.metrics = new ApplicationLoadBalancerMetrics(this, parseLoadBalancerFullName(this.loadBalancerArn));
   }
 
+  @MethodMetadata()
   public addListener(id: string, props: BaseApplicationListenerProps): ApplicationListener {
     return new ApplicationListener(this, id, {
       ...props,

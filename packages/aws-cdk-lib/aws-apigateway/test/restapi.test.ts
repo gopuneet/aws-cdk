@@ -1,7 +1,12 @@
 import { testDeprecated } from '@aws-cdk/cdk-build-tools';
+import { cx_api } from '../..';
 import { Template } from '../../assertions';
+import { UserPool } from '../../aws-cognito';
 import { GatewayVpcEndpoint } from '../../aws-ec2';
-import { App, CfnElement, CfnResource, Lazy, Size, Stack } from '../../core';
+import * as ec2 from '../../aws-ec2';
+import * as iam from '../../aws-iam';
+import { App, CfnElement, CfnResource, Lazy, RemovalPolicy, Size, Stack } from '../../core';
+import { JSII_RUNTIME_SYMBOL } from '../../core/lib/constants';
 import * as apigw from '../lib';
 
 describe('restapi', () => {
@@ -14,6 +19,8 @@ describe('restapi', () => {
     api.root.addMethod('GET'); // must have at least one method or an API definition
 
     // THEN
+    expect(apigw.RestApi.isRestApi(api)).toBe(true);
+
     Template.fromStack(stack).templateMatches({
       Resources: {
         myapi4C7BF186: {
@@ -324,6 +331,25 @@ describe('restapi', () => {
     })).toThrow(/Cannot set 'deployOptions' if 'deploy' is disabled/);
   });
 
+  test('uses correct description for Deployment from "deployOptions"', () => {
+    // GIVEN
+    const stack = new Stack();
+    const api = new apigw.RestApi(stack, 'restapi', {
+      description: 'Api description',
+      deployOptions: { description: 'Deployment description' },
+    });
+    api.root.addMethod('GET');
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Deployment', {
+      Description: 'Deployment description',
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::RestApi', {
+      Description: 'Api description',
+    });
+  });
+
   test('CloudWatch role is created for API Gateway', () => {
     // GIVEN
     const stack = new Stack();
@@ -360,29 +386,29 @@ describe('restapi', () => {
     // THEN
     expect(stack.resolve(api.url)).toEqual({
       'Fn::Join':
-    ['',
-      ['https://',
-        { Ref: 'apiC8550315' },
-        '.execute-api.',
-        { Ref: 'AWS::Region' },
-        '.',
-        { Ref: 'AWS::URLSuffix' },
-        '/',
-        { Ref: 'apiDeploymentStageprod896C8101' },
-        '/']],
+        ['',
+          ['https://',
+            { Ref: 'apiC8550315' },
+            '.execute-api.',
+            { Ref: 'AWS::Region' },
+            '.',
+            { Ref: 'AWS::URLSuffix' },
+            '/',
+            { Ref: 'apiDeploymentStageprod896C8101' },
+            '/']],
     });
     expect(stack.resolve(api.urlForPath('/foo/bar'))).toEqual({
       'Fn::Join':
-    ['',
-      ['https://',
-        { Ref: 'apiC8550315' },
-        '.execute-api.',
-        { Ref: 'AWS::Region' },
-        '.',
-        { Ref: 'AWS::URLSuffix' },
-        '/',
-        { Ref: 'apiDeploymentStageprod896C8101' },
-        '/foo/bar']],
+        ['',
+          ['https://',
+            { Ref: 'apiC8550315' },
+            '.execute-api.',
+            { Ref: 'AWS::Region' },
+            '.',
+            { Ref: 'AWS::URLSuffix' },
+            '/',
+            { Ref: 'apiDeploymentStageprod896C8101' },
+            '/foo/bar']],
     });
   });
 
@@ -419,16 +445,16 @@ describe('restapi', () => {
     // THEN
     expect(stack.resolve(arn)).toEqual({
       'Fn::Join':
-    ['',
-      ['arn:',
-        { Ref: 'AWS::Partition' },
-        ':execute-api:',
-        { Ref: 'AWS::Region' },
-        ':',
-        { Ref: 'AWS::AccountId' },
-        ':',
-        { Ref: 'apiC8550315' },
-        '/stage/method/path']],
+        ['',
+          ['arn:',
+            { Ref: 'AWS::Partition' },
+            ':execute-api:',
+            { Ref: 'AWS::Region' },
+            ':',
+            { Ref: 'AWS::AccountId' },
+            ':',
+            { Ref: 'apiC8550315' },
+            '/stage/method/path']],
     });
   });
 
@@ -462,18 +488,18 @@ describe('restapi', () => {
     // THEN
     expect(stack.resolve(method.methodArn)).toEqual({
       'Fn::Join':
-    ['',
-      ['arn:',
-        { Ref: 'AWS::Partition' },
-        ':execute-api:',
-        { Ref: 'AWS::Region' },
-        ':',
-        { Ref: 'AWS::AccountId' },
-        ':',
-        { Ref: 'apiC8550315' },
-        '/',
-        { Ref: 'apiDeploymentStageprod896C8101' },
-        '/*/']],
+        ['',
+          ['arn:',
+            { Ref: 'AWS::Partition' },
+            ':execute-api:',
+            { Ref: 'AWS::Region' },
+            ':',
+            { Ref: 'AWS::AccountId' },
+            ':',
+            { Ref: 'apiC8550315' },
+            '/',
+            { Ref: 'apiDeploymentStageprod896C8101' },
+            '/*/']],
     });
   });
 
@@ -931,6 +957,42 @@ describe('restapi', () => {
       minimumCompressionSize: 1024,
     })).toThrow(/both properties minCompressionSize and minimumCompressionSize cannot be set at once./);
   });
+
+  test('can specify CloudWatch Role and Account removal policy', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    const api = new apigw.RestApi(stack, 'myapi', {
+      cloudWatchRole: true,
+      cloudWatchRoleRemovalPolicy: RemovalPolicy.DESTROY,
+    });
+
+    api.root.addMethod('GET');
+
+    // THEN
+    Template.fromStack(stack).templateMatches({
+      Resources: {
+        myapiCloudWatchRoleEB425128: {
+          Type: 'AWS::IAM::Role',
+          DeletionPolicy: 'Delete',
+        },
+        myapiAccountC3A4750C: {
+          Type: 'AWS::ApiGateway::Account',
+          DeletionPolicy: 'Delete',
+        },
+      },
+    });
+  });
+
+  test('cloudWatchRole must be enabled for specifying specify CloudWatch Role and Account removal policy', () => {
+    expect(() => {
+      new apigw.RestApi(new Stack(), 'myapi', {
+        cloudWatchRole: false,
+        cloudWatchRoleRemovalPolicy: RemovalPolicy.DESTROY,
+      });
+    }).toThrow(/'cloudWatchRole' must be enabled for 'cloudWatchRoleRemovalPolicy' to be applied./);
+  });
 });
 
 describe('Import', () => {
@@ -1009,6 +1071,8 @@ describe('SpecRestApi', () => {
     resource.addMethod('GET');
 
     // THEN
+    expect(apigw.RestApi.isRestApi(api)).toBe(false);
+
     Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Resource', {
       PathPart: 'pets',
       ParentId: stack.resolve(api.restApiRootResourceId),
@@ -1331,6 +1395,63 @@ describe('SpecRestApi', () => {
     });
   });
 
+  test('check if url property exists for a SpecRestApi', () => {
+    // GIVEN
+    const stack = new Stack();
+    const restApiSwaggerDefinition = {
+      openapi: '3.0.2',
+      info: {
+        version: '1.0.0',
+        title: 'Test API for CDK',
+      },
+      paths: {
+        '/pets': {
+          get: {
+            'summary': 'Test Method',
+            'operationId': 'testMethod',
+            'responses': {
+              200: {
+                description: 'A paged array of pets',
+                content: {
+                  'application/json': {
+                    schema: {
+                      $ref: '#/components/schemas/Empty',
+                    },
+                  },
+                },
+              },
+            },
+            'x-amazon-apigateway-integration': {
+              responses: {
+                default: {
+                  statusCode: '200',
+                },
+              },
+              requestTemplates: {
+                'application/json': '{"statusCode": 200}',
+              },
+              passthroughBehavior: 'when_no_match',
+              type: 'mock',
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Empty: {
+            title: 'Empty Schema',
+            type: 'object',
+          },
+        },
+      },
+    };
+    const api = new apigw.SpecRestApi(stack, 'my-api', {
+      apiDefinition: apigw.ApiDefinition.fromInline(restApiSwaggerDefinition),
+    });
+    // THEN
+    expect(api.url).toBeTruthy();
+  });
+
   test('can override "apiKeyRequired" set in "defaultMethodOptions" at the resource level', () => {
     // GIVEN
     const stack = new Stack();
@@ -1357,5 +1478,550 @@ describe('SpecRestApi', () => {
       HttpMethod: 'POST',
       ApiKeyRequired: false,
     });
+  });
+
+  describe('addToResourcePolicy', () => {
+    test('add a statement to the resource policy for RestApi', () => {
+      // GIVEN
+      const stack = new Stack();
+      const api = new apigw.RestApi(stack, 'Api');
+      api.root.addMethod('GET', undefined, {});
+      const statement = new iam.PolicyStatement({
+        actions: ['execute-api:Invoke'],
+        resources: [Stack.of(stack).formatArn({
+          service: 'execute-api',
+          resource: '*',
+          sep: '/',
+        })],
+      });
+
+      // WHEN
+      api.addToResourcePolicy(statement);
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::RestApi', {
+        Policy: {
+          Version: '2012-10-17',
+          Statement: [{
+            Action: 'execute-api:Invoke',
+            Effect: 'Allow',
+            Resource: {
+              'Fn::Join': [
+                '',
+                [
+                  'arn:',
+                  { Ref: 'AWS::Partition' },
+                  ':execute-api:',
+                  { Ref: 'AWS::Region' },
+                  ':',
+                  { Ref: 'AWS::AccountId' },
+                  ':*',
+                ],
+              ],
+            },
+          }],
+        },
+      });
+    });
+
+    test('add a statement to the resource policy for RestApi with policy provided', () => {
+      // GIVEN
+      const stack = new Stack();
+      const api = new apigw.RestApi(stack, 'Api', {
+        policy: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              actions: ['execute-api:Invoke'],
+              resources: [Stack.of(stack).formatArn({
+                service: 'execute-api',
+                resource: '*',
+                sep: '/',
+              })],
+            }),
+          ],
+        }),
+      });
+      api.root.addMethod('GET', undefined, {});
+
+      const additionalPolicyStatement = new iam.PolicyStatement({
+        actions: ['execute-api:Invoke'],
+        resources: [Stack.of(stack).formatArn({
+          service: 'execute-api',
+          resource: '*',
+          sep: '/',
+        })],
+        effect: iam.Effect.DENY,
+        principals: [new iam.AnyPrincipal()],
+        conditions: {
+          StringNotEquals: {
+            'aws:SourceVpce': 'vpce-1234567890abcdef0',
+          },
+        },
+      });
+
+      // WHEN
+      api.addToResourcePolicy(additionalPolicyStatement);
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::RestApi', {
+        Policy: {
+          Version: '2012-10-17',
+          Statement: [
+            {
+              Action: 'execute-api:Invoke',
+              Effect: 'Allow',
+              Resource: {
+                'Fn::Join': [
+                  '',
+                  [
+                    'arn:',
+                    { Ref: 'AWS::Partition' },
+                    ':execute-api:',
+                    { Ref: 'AWS::Region' },
+                    ':',
+                    { Ref: 'AWS::AccountId' },
+                    ':*',
+                  ],
+                ],
+              },
+            },
+            {
+              Action: 'execute-api:Invoke',
+              Effect: 'Deny',
+              Resource: {
+                'Fn::Join': [
+                  '',
+                  [
+                    'arn:',
+                    { Ref: 'AWS::Partition' },
+                    ':execute-api:',
+                    { Ref: 'AWS::Region' },
+                    ':',
+                    { Ref: 'AWS::AccountId' },
+                    ':*',
+                  ],
+                ],
+              },
+              Condition: {
+                StringNotEquals: {
+                  'aws:SourceVpce': 'vpce-1234567890abcdef0',
+                },
+              },
+            },
+          ],
+        },
+      });
+    });
+
+    test('add a statement to the resource policy for SpecRestApi', () => {
+      // GIVEN
+      const stack = new Stack();
+      const api = new apigw.SpecRestApi(stack, 'Api', {
+        apiDefinition: apigw.ApiDefinition.fromInline({ foo: 'bar' }),
+      });
+      api.root.addMethod('GET', undefined, {});
+      const statement = new iam.PolicyStatement({
+        actions: ['execute-api:Invoke'],
+        resources: [Stack.of(stack).formatArn({
+          service: 'execute-api',
+          resource: '*',
+          sep: '/',
+        })],
+      });
+
+      // WHEN
+      api.addToResourcePolicy(statement);
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::RestApi', {
+        Policy: {
+          Version: '2012-10-17',
+          Statement: [{
+            Action: 'execute-api:Invoke',
+            Effect: 'Allow',
+            Resource: {
+              'Fn::Join': [
+                '',
+                [
+                  'arn:',
+                  { Ref: 'AWS::Partition' },
+                  ':execute-api:',
+                  { Ref: 'AWS::Region' },
+                  ':',
+                  { Ref: 'AWS::AccountId' },
+                  ':*',
+                ],
+              ],
+            },
+          }],
+        },
+      });
+    });
+
+    test('add a statement to the resource policy for SpecRestApi with policy provided', () => {
+      // GIVEN
+      const stack = new Stack();
+      const api = new apigw.SpecRestApi(stack, 'Api', {
+        apiDefinition: apigw.ApiDefinition.fromInline({ foo: 'bar' }),
+        policy: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              actions: ['execute-api:Invoke'],
+              resources: [Stack.of(stack).formatArn({
+                service: 'execute-api',
+                resource: '*',
+                sep: '/',
+              })],
+            }),
+          ],
+        }),
+      });
+      api.root.addMethod('GET', undefined, {});
+
+      const additionalPolicyStatement = new iam.PolicyStatement({
+        actions: ['execute-api:Invoke'],
+        resources: [Stack.of(stack).formatArn({
+          service: 'execute-api',
+          resource: '*',
+          sep: '/',
+        })],
+        effect: iam.Effect.DENY,
+        principals: [new iam.AnyPrincipal()],
+        conditions: {
+          StringNotEquals: {
+            'aws:SourceVpce': 'vpce-1234567890abcdef0',
+          },
+        },
+      });
+
+      // WHEN
+      api.addToResourcePolicy(additionalPolicyStatement);
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::RestApi', {
+        Policy: {
+          Version: '2012-10-17',
+          Statement: [
+            {
+              Action: 'execute-api:Invoke',
+              Effect: 'Allow',
+              Resource: {
+                'Fn::Join': [
+                  '',
+                  [
+                    'arn:',
+                    { Ref: 'AWS::Partition' },
+                    ':execute-api:',
+                    { Ref: 'AWS::Region' },
+                    ':',
+                    { Ref: 'AWS::AccountId' },
+                    ':*',
+                  ],
+                ],
+              },
+            },
+            {
+              Action: 'execute-api:Invoke',
+              Effect: 'Deny',
+              Resource: {
+                'Fn::Join': [
+                  '',
+                  [
+                    'arn:',
+                    { Ref: 'AWS::Partition' },
+                    ':execute-api:',
+                    { Ref: 'AWS::Region' },
+                    ':',
+                    { Ref: 'AWS::AccountId' },
+                    ':*',
+                  ],
+                ],
+              },
+              Condition: {
+                StringNotEquals: {
+                  'aws:SourceVpce': 'vpce-1234567890abcdef0',
+                },
+              },
+            },
+          ],
+        },
+      });
+    });
+
+    test('cannot add a statement to the resource policy for imported RestApi from API ID', () => {
+      // GIVEN
+      const stack = new Stack();
+      const api = apigw.RestApi.fromRestApiId(stack, 'Api', 'api-id');
+
+      // THEN
+      const result = api.addToResourcePolicy(new iam.PolicyStatement({
+        actions: ['execute-api:Invoke'],
+        resources: [Stack.of(stack).formatArn({
+          service: 'execute-api',
+          resource: '*',
+          sep: '/',
+        })],
+      }));
+
+      expect(result.statementAdded).toBe(false);
+    });
+
+    test('cannot add a statement to the resource policy for imported RestApi from API Attributes', () => {
+      // GIVEN
+      const stack = new Stack();
+      const api = apigw.RestApi.fromRestApiAttributes(stack, 'Api', {
+        restApiId: 'api-id',
+        rootResourceId: 'root-id',
+      });
+
+      // THEN
+      const result = api.addToResourcePolicy(new iam.PolicyStatement({
+        actions: ['execute-api:Invoke'],
+        resources: [Stack.of(stack).formatArn({
+          service: 'execute-api',
+          resource: '*',
+          sep: '/',
+        })],
+      }));
+
+      expect(result.statementAdded).toBe(false);
+    });
+  });
+
+  describe('grantInvokeFromVpcEndpointOnly', () => {
+    test('called once', () => {
+      // GIVEN
+      const stack = new Stack();
+      const vpc = new ec2.Vpc(stack, 'VPC');
+      const vpcEndpoint = vpc.addInterfaceEndpoint('APIGatewayEndpoint', {
+        service: ec2.InterfaceVpcEndpointAwsService.APIGATEWAY,
+      });
+      const api = new apigw.RestApi(stack, 'my-api', {
+        endpointTypes: [apigw.EndpointType.PRIVATE],
+      });
+      api.root.addMethod('GET');
+      api.grantInvokeFromVpcEndpointsOnly([vpcEndpoint]);
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::RestApi', {
+        Policy: {
+          Version: '2012-10-17',
+          Statement: [{
+            Action: 'execute-api:Invoke',
+            Effect: 'Deny',
+            Resource: 'execute-api:/*',
+            Condition: {
+              StringNotEquals: {
+                'aws:SourceVpce': [{
+                  Ref: 'VPCAPIGatewayEndpoint5865ABCA',
+                }],
+              },
+            },
+          }, {
+            Action: 'execute-api:Invoke',
+            Effect: 'Allow',
+            Resource: 'execute-api:/*',
+            Principal: {
+              AWS: '*',
+            },
+          }],
+        },
+      });
+    });
+
+    test('called once with multiple endpoints', () => {
+      // GIVEN
+      const stack = new Stack();
+      const vpc = new ec2.Vpc(stack, 'VPC');
+      const vpcEndpoint1 = vpc.addInterfaceEndpoint('APIGatewayEndpoint1', {
+        service: ec2.InterfaceVpcEndpointAwsService.APIGATEWAY,
+      });
+      const vpcEndpoint2 = vpc.addInterfaceEndpoint('APIGatewayEndpoint2', {
+        service: ec2.InterfaceVpcEndpointAwsService.APIGATEWAY,
+      });
+      const api = new apigw.RestApi(stack, 'my-api', {
+        endpointTypes: [apigw.EndpointType.PRIVATE],
+      });
+      api.root.addMethod('GET');
+      api.grantInvokeFromVpcEndpointsOnly([vpcEndpoint1, vpcEndpoint2]);
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::RestApi', {
+        Policy: {
+          Version: '2012-10-17',
+          Statement: [{
+            Action: 'execute-api:Invoke',
+            Effect: 'Deny',
+            Resource: 'execute-api:/*',
+            Condition: {
+              StringNotEquals: {
+                'aws:SourceVpce': [{
+                  Ref: 'VPCAPIGatewayEndpoint1226CF9D3',
+                }, {
+                  Ref: 'VPCAPIGatewayEndpoint2E77DD966',
+                }],
+              },
+            },
+          }, {
+            Action: 'execute-api:Invoke',
+            Effect: 'Allow',
+            Resource: 'execute-api:/*',
+            Principal: {
+              AWS: '*',
+            },
+          }],
+        },
+      });
+    });
+
+    test('called twice with the different endpoints', () => {
+      // GIVEN
+      const stack = new Stack();
+      const vpc = new ec2.Vpc(stack, 'VPC');
+      const vpcEndpoint1 = vpc.addInterfaceEndpoint('APIGatewayEndpoint1', {
+        service: ec2.InterfaceVpcEndpointAwsService.APIGATEWAY,
+      });
+      const vpcEndpoint2 = vpc.addInterfaceEndpoint('APIGatewayEndpoint2', {
+        service: ec2.InterfaceVpcEndpointAwsService.APIGATEWAY,
+      });
+      const api = new apigw.RestApi(stack, 'my-api', {
+        endpointTypes: [apigw.EndpointType.PRIVATE],
+      });
+      api.root.addMethod('GET');
+      api.grantInvokeFromVpcEndpointsOnly([vpcEndpoint1]);
+      api.grantInvokeFromVpcEndpointsOnly([vpcEndpoint2]);
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::RestApi', {
+        Policy: {
+          Version: '2012-10-17',
+          Statement: [{
+            Action: 'execute-api:Invoke',
+            Effect: 'Deny',
+            Resource: 'execute-api:/*',
+            Condition: {
+              StringNotEquals: {
+                'aws:SourceVpce': [{
+                  Ref: 'VPCAPIGatewayEndpoint1226CF9D3',
+                }, {
+                  Ref: 'VPCAPIGatewayEndpoint2E77DD966',
+                }],
+              },
+            },
+          }, {
+            Action: 'execute-api:Invoke',
+            Effect: 'Allow',
+            Resource: 'execute-api:/*',
+            Principal: {
+              AWS: '*',
+            },
+          }],
+        },
+      });
+    });
+
+    test('called twice with the same endpoint', () => {
+      // GIVEN
+      const stack = new Stack();
+      const vpc = new ec2.Vpc(stack, 'VPC');
+      const vpcEndpoint = vpc.addInterfaceEndpoint('APIGatewayEndpoint', {
+        service: ec2.InterfaceVpcEndpointAwsService.APIGATEWAY,
+      });
+      const api = new apigw.RestApi(stack, 'my-api', {
+        endpointTypes: [apigw.EndpointType.PRIVATE],
+      });
+      api.root.addMethod('GET');
+      api.grantInvokeFromVpcEndpointsOnly([vpcEndpoint]);
+      api.grantInvokeFromVpcEndpointsOnly([vpcEndpoint]);
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::RestApi', {
+        Policy: {
+          Version: '2012-10-17',
+          Statement: [{
+            Action: 'execute-api:Invoke',
+            Effect: 'Deny',
+            Resource: 'execute-api:/*',
+            Condition: {
+              StringNotEquals: {
+                'aws:SourceVpce': [{
+                  Ref: 'VPCAPIGatewayEndpoint5865ABCA',
+                }],
+              },
+            },
+          }, {
+            Action: 'execute-api:Invoke',
+            Effect: 'Allow',
+            Resource: 'execute-api:/*',
+            Principal: {
+              AWS: '*',
+            },
+          }],
+        },
+      });
+    });
+  });
+});
+
+describe('telemetry metadata', () => {
+  it('redaction happens when feature flag is enabled', () => {
+    const app = new App();
+    app.node.setContext(cx_api.ENABLE_ADDITIONAL_METADATA_COLLECTION, true);
+    const stack = new Stack(app);
+
+    const mockConstructor = {
+      [JSII_RUNTIME_SYMBOL]: {
+        fqn: 'aws-cdk-lib.aws-apigateway.RestApi',
+      },
+    };
+    jest.spyOn(Object, 'getPrototypeOf').mockReturnValue({
+      constructor: mockConstructor,
+    });
+
+    const api = new apigw.RestApi(stack, 'myapi', {
+      defaultMethodOptions: {
+        apiKeyRequired: true,
+        authorizer: new apigw.CognitoUserPoolsAuthorizer(stack, 'myauthorizer', {
+          cognitoUserPools: [new UserPool(stack, 'myuserpool')],
+        }),
+      },
+    });
+
+    expect(api.node.metadata).toStrictEqual([{
+      data: {
+        defaultMethodOptions: {
+          apiKeyRequired: true,
+          authorizer: '*',
+        },
+      },
+      trace: undefined,
+      type: 'aws:cdk:analytics:construct',
+    }]);
+  });
+
+  it('redaction happens when feature flag is disabled', () => {
+    const app = new App();
+    app.node.setContext(cx_api.ENABLE_ADDITIONAL_METADATA_COLLECTION, false);
+    const stack = new Stack(app);
+
+    const mockConstructor = {
+      [JSII_RUNTIME_SYMBOL]: {
+        fqn: 'aws-cdk-lib.aws-apigateway.RestApi',
+      },
+    };
+    jest.spyOn(Object, 'getPrototypeOf').mockReturnValue({
+      constructor: mockConstructor,
+    });
+
+    const api = new apigw.RestApi(stack, 'myapi', {
+      defaultMethodOptions: {
+        apiKeyRequired: true,
+        authorizer: new apigw.CognitoUserPoolsAuthorizer(stack, 'myauthorizer', {
+          cognitoUserPools: [new UserPool(stack, 'myuserpool')],
+        }),
+      },
+    });
+
+    expect(api.node.metadata).toStrictEqual([]);
   });
 });

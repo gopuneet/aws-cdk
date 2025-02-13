@@ -38,6 +38,9 @@
   "aws-applicationinsights": [
     "AWS::ApplicationInsights"
   ],
+  "aws-applicationsignals": [
+    "AWS::ApplicationSignals"
+  ],
   "aws-appmesh": [
     "AWS::AppMesh"
   ],
@@ -50,8 +53,14 @@
   "aws-appsync": [
     "AWS::AppSync"
   ],
+  "aws-apptest": [
+    "AWS::AppTest"
+  ],
   "aws-aps": [
     "AWS::APS"
+  ],
+  "aws-arczonalshift": [
+    "AWS::ARCZonalShift"
   ],
   "aws-athena": [
     "AWS::Athena"
@@ -65,6 +74,9 @@
   "aws-autoscalingplans": [
     "AWS::AutoScalingPlans"
   ],
+  "aws-b2bi": [
+    "AWS::B2BI"
+  ],
   "aws-backup": [
     "AWS::Backup"
   ],
@@ -73,6 +85,12 @@
   ],
   "aws-batch": [
     "AWS::Batch"
+  ],
+  "aws-bcmdataexports": [
+    "AWS::BCMDataExports"
+  ],
+  "aws-bedrock": [
+    "AWS::Bedrock"
   ],
   "aws-billingconductor": [
     "AWS::BillingConductor"
@@ -91,6 +109,12 @@
   ],
   "aws-chatbot": [
     "AWS::Chatbot"
+  ],
+  "aws-cleanrooms": [
+    "AWS::CleanRooms"
+  ],
+  "aws-cleanroomsml": [
+    "AWS::CleanRoomsML"
   ],
   "aws-cloud9": [
     "AWS::Cloud9"
@@ -115,6 +139,9 @@
   ],
   "aws-codecommit": [
     "AWS::CodeCommit"
+  ],
+  "aws-codeconnections": [
+    "AWS::CodeConnections"
   ],
   "aws-codedeploy": [
     "AWS::CodeDeploy"
@@ -152,6 +179,9 @@
   "aws-connectcampaigns": [
     "AWS::ConnectCampaigns"
   ],
+  "aws-connectcampaignsv2": [
+    "AWS::ConnectCampaignsV2"
+  ],
   "aws-controltower": [
     "AWS::ControlTower"
   ],
@@ -170,8 +200,14 @@
   "aws-datasync": [
     "AWS::DataSync"
   ],
+  "aws-datazone": [
+    "AWS::DataZone"
+  ],
   "aws-dax": [
     "AWS::DAX"
+  ],
+  "aws-deadline": [
+    "AWS::Deadline"
   ],
   "aws-detective": [
     "AWS::Detective"
@@ -239,6 +275,9 @@
   "aws-emrserverless": [
     "AWS::EMRServerless"
   ],
+  "aws-entityresolution": [
+    "AWS::EntityResolution"
+  ],
   "aws-events": [
     "AWS::Events"
   ],
@@ -290,6 +329,9 @@
   "aws-guardduty": [
     "AWS::GuardDuty"
   ],
+  "aws-healthimaging": [
+    "AWS::HealthImaging"
+  ],
   "aws-healthlake": [
     "AWS::HealthLake"
   ],
@@ -311,11 +353,11 @@
   "aws-internetmonitor": [
     "AWS::InternetMonitor"
   ],
+  "aws-invoicing": [
+    "AWS::Invoicing"
+  ],
   "aws-iot": [
     "AWS::IoT"
-  ],
-  "aws-iot1click": [
-    "AWS::IoT1Click"
   ],
   "aws-iotanalytics": [
     "AWS::IoTAnalytics"
@@ -384,6 +426,9 @@
   "aws-lambda": [
     "AWS::Lambda"
   ],
+  "aws-launchwizard": [
+    "AWS::LaunchWizard"
+  ],
   "aws-lex": [
     "AWS::Lex"
   ],
@@ -429,6 +474,9 @@
   "aws-mediapackage": [
     "AWS::MediaPackage"
   ],
+  "aws-mediapackagev2": [
+    "AWS::MediaPackageV2"
+  ],
   "aws-mediastore": [
     "AWS::MediaStore"
   ],
@@ -447,6 +495,9 @@
   "aws-neptune": [
     "AWS::Neptune"
   ],
+  "aws-neptunegraph": [
+    "AWS::NeptuneGraph"
+  ],
   "aws-networkfirewall": [
     "AWS::NetworkFirewall"
   ],
@@ -455,6 +506,12 @@
   ],
   "aws-nimblestudio": [
     "AWS::NimbleStudio"
+  ],
+  "aws-notifications": [
+    "AWS::Notifications"
+  ],
+  "aws-notificationscontacts": [
+    "AWS::NotificationsContacts"
   ],
   "aws-oam": [
     "AWS::Oam"
@@ -483,6 +540,18 @@
   "aws-panorama": [
     "AWS::Panorama"
   ],
+  "aws-paymentcryptography": [
+    "AWS::PaymentCryptography"
+  ],
+  "aws-pcaconnectorad": [
+    "AWS::PCAConnectorAD"
+  ],
+  "aws-pcaconnectorscep": [
+    "AWS::PCAConnectorSCEP"
+  ],
+  "aws-pcs": [
+    "AWS::PCS"
+  ],
   "aws-personalize": [
     "AWS::Personalize"
   ],
@@ -498,6 +567,9 @@
   "aws-proton": [
     "AWS::Proton"
   ],
+  "aws-qbusiness": [
+    "AWS::QBusiness"
+  ],
   "aws-qldb": [
     "AWS::QLDB"
   ],
@@ -506,6 +578,9 @@
   ],
   "aws-ram": [
     "AWS::RAM"
+  ],
+  "aws-rbin": [
+    "AWS::Rbin"
   ],
   "aws-rds": [
     "AWS::RDS"
@@ -540,6 +615,9 @@
   "aws-route53": [
     "AWS::Route53"
   ],
+  "aws-route53profiles": [
+    "AWS::Route53Profiles"
+  ],
   "aws-route53recoverycontrol": [
     "AWS::Route53RecoveryControl"
   ],
@@ -555,11 +633,17 @@
   "aws-s3": [
     "AWS::S3"
   ],
+  "aws-s3express": [
+    "AWS::S3Express"
+  ],
   "aws-s3objectlambda": [
     "AWS::S3ObjectLambda"
   ],
   "aws-s3outposts": [
     "AWS::S3Outposts"
+  ],
+  "aws-s3tables": [
+    "AWS::S3Tables"
   ],
   "aws-sagemaker": [
     "AWS::SageMaker"
@@ -578,6 +662,9 @@
   ],
   "aws-securityhub": [
     "AWS::SecurityHub"
+  ],
+  "aws-securitylake": [
+    "AWS::SecurityLake"
   ],
   "aws-servicecatalog": [
     "AWS::ServiceCatalog"
@@ -615,6 +702,9 @@
   "aws-ssmincidents": [
     "AWS::SSMIncidents"
   ],
+  "aws-ssmquicksetup": [
+    "AWS::SSMQuickSetup"
+  ],
   "aws-sso": [
     "AWS::SSO"
   ],
@@ -636,6 +726,9 @@
   "aws-transfer": [
     "AWS::Transfer"
   ],
+  "aws-verifiedpermissions": [
+    "AWS::VerifiedPermissions"
+  ],
   "aws-voiceid": [
     "AWS::VoiceID"
   ],
@@ -656,6 +749,12 @@
   ],
   "aws-workspaces": [
     "AWS::WorkSpaces"
+  ],
+  "aws-workspacesthinclient": [
+    "AWS::WorkSpacesThinClient"
+  ],
+  "aws-workspacesweb": [
+    "AWS::WorkSpacesWeb"
   ],
   "aws-xray": [
     "AWS::XRay"

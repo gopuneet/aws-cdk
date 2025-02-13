@@ -296,7 +296,7 @@ export abstract class S3Location {
   }
 
   /**
-   * An `IS3Location` determined fully by a JSON Path from the task input.
+   * An `IS3Location` determined fully by a JSONata expression or JSON Path from the task input.
    *
    * Due to the dynamic nature of those locations, the IAM grants that will be set by `grantRead` and `grantWrite`
    * apply to the `*` resource.
@@ -304,7 +304,9 @@ export abstract class S3Location {
    * @param expression the JSON expression resolving to an S3 location URI.
    */
   public static fromJsonExpression(expression: string): S3Location {
-    return new StandardS3Location({ uri: sfn.JsonPath.stringAt(expression) });
+    const isJsonata = () => expression.startsWith('{%');
+    const uri = isJsonata() ? expression : sfn.JsonPath.stringAt(expression);
+    return new StandardS3Location({ uri });
   }
 
   /**
@@ -362,7 +364,7 @@ export abstract class DockerImage {
   /**
    * Reference a Docker image which URI is obtained from the task's input.
    *
-   * @param expression           the JSON path expression with the task input.
+   * @param expression           the JSONata or JSON path expression with the task input.
    * @param allowAnyEcrImagePull whether ECR access should be permitted (set to `false` if the image will never be in ECR).
    */
   public static fromJsonExpression(expression: string, allowAnyEcrImagePull = true): DockerImage {
@@ -416,7 +418,7 @@ export enum S3DataType {
   /**
    * Augmented Manifest File Data Type
    */
-  AUGMENTED_MANIFEST_FILE = 'AugmentedManifestFile'
+  AUGMENTED_MANIFEST_FILE = 'AugmentedManifestFile',
 }
 
 /**
@@ -432,7 +434,7 @@ export enum S3DataDistributionType {
   /**
    * Sharded By S3 Key Data Distribution Type
    */
-  SHARDED_BY_S3_KEY = 'ShardedByS3Key'
+  SHARDED_BY_S3_KEY = 'ShardedByS3Key',
 }
 
 /**
@@ -448,7 +450,7 @@ export enum RecordWrapperType {
   /**
    * RecordIO record wrapper type
    */
-  RECORD_IO = 'RecordIO'
+  RECORD_IO = 'RecordIO',
 }
 
 /**
@@ -464,7 +466,12 @@ export enum InputMode {
   /**
    * File mode.
    */
-  FILE = 'File'
+  FILE = 'File',
+
+  /**
+   * FastFile mode.
+   */
+  FAST_FILE = 'FastFile',
 }
 
 /**
@@ -480,7 +487,7 @@ export enum CompressionType {
   /**
    * Gzip compression type
    */
-  GZIP = 'Gzip'
+  GZIP = 'Gzip',
 }
 
 //
@@ -683,7 +690,6 @@ export interface ContainerDefinitionOptions {
  * @see https://docs.aws.amazon.com/sagemaker/latest/APIReference/API_ContainerDefinition.html
  */
 export class ContainerDefinition implements IContainerDefinition {
-
   constructor(private readonly options: ContainerDefinitionOptions) {}
 
   /**
@@ -799,7 +805,7 @@ export class AcceleratorClass {
   /**
    * Custom AcceleratorType
    * @param version - Elastic Inference accelerator generation
-  */
+   */
   public static of(version: string) { return new AcceleratorClass(version); }
   /**
    * @param version - Elastic Inference accelerator generation
@@ -848,7 +854,7 @@ export enum BatchStrategy {
   /**
    * Use a single record when making an invocation request.
    */
-  SINGLE_RECORD = 'SingleRecord'
+  SINGLE_RECORD = 'SingleRecord',
 }
 
 /**
@@ -875,7 +881,7 @@ export enum SplitType {
   /**
    * Split using TensorFlow TFRecord format.
    */
-  TF_RECORD = 'TFRecord'
+  TF_RECORD = 'TFRecord',
 }
 
 /**
@@ -892,7 +898,7 @@ export enum AssembleWith {
   /**
    * Add a newline character at the end of every transformed record.
    */
-  LINE = 'Line'
+  LINE = 'Line',
 
 }
 
@@ -901,7 +907,7 @@ class StandardDockerImage extends DockerImage {
   private readonly imageUri: string;
   private readonly repository?: ecr.IRepository;
 
-  constructor(opts: { allowAnyEcrImagePull?: boolean, imageUri: string, repository?: ecr.IRepository }) {
+  constructor(opts: { allowAnyEcrImagePull?: boolean; imageUri: string; repository?: ecr.IRepository }) {
     super();
 
     this.allowAnyEcrImagePull = !!opts.allowAnyEcrImagePull;
@@ -934,7 +940,7 @@ class StandardS3Location extends S3Location {
   private readonly keyGlob: string;
   private readonly uri: string;
 
-  constructor(opts: { bucket?: s3.IBucket, keyPrefix?: string, uri: string }) {
+  constructor(opts: { bucket?: s3.IBucket; keyPrefix?: string; uri: string }) {
     super();
     this.bucket = opts.bucket;
     this.keyGlob = `${opts.keyPrefix || ''}*`;

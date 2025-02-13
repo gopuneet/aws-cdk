@@ -9,6 +9,7 @@ import * as logs from '../../aws-logs';
 import * as s3 from '../../aws-s3';
 import * as sns from '../../aws-sns';
 import * as cdk from '../../core';
+import { UnscopedValidationError } from '../../core/lib/errors';
 import * as cxapi from '../../cx-api';
 import * as s3deploy from '../lib';
 
@@ -90,6 +91,24 @@ test('deploy with configured log retention', () => {
 
   // THEN
   Template.fromStack(stack).hasResourceProperties('Custom::LogRetention', { RetentionInDays: 7 });
+});
+
+test('deploy with log group', () => {
+  // GIVEN
+  const stack = new cdk.Stack();
+  const bucket = new s3.Bucket(stack, 'Dest');
+
+  // WHEN
+  new s3deploy.BucketDeployment(stack, 'Deploy', {
+    sources: [s3deploy.Source.asset(path.join(__dirname, 'my-website'))],
+    destinationBucket: bucket,
+    logGroup: new logs.LogGroup(stack, 'LogGroup', {
+      retention: logs.RetentionDays.ONE_WEEK,
+    }),
+  });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::Logs::LogGroup', { RetentionInDays: 7 });
 });
 
 test('deploy from local directory assets', () => {
@@ -219,7 +238,6 @@ test('deploy from a local .zip file', () => {
     sources: [s3deploy.Source.asset(path.join(__dirname, 'my-website.zip'))],
     destinationBucket: bucket,
   });
-
 });
 
 test('AWS_CA_BUNDLE is set', () => {
@@ -233,7 +251,7 @@ test('AWS_CA_BUNDLE is set', () => {
     destinationBucket: bucket,
   });
 
-  //THEN
+  // THEN
   Template.fromStack(stack).hasResourceProperties('AWS::Lambda::Function', {
     Environment: {
       Variables: {
@@ -256,7 +274,7 @@ test('deploy from a local .zip file when efs is enabled', () => {
     vpc: new ec2.Vpc(stack, 'Vpc'),
   });
 
-  //THEN
+  // THEN
   Template.fromStack(stack).hasResourceProperties('AWS::Lambda::Function', {
     Environment: {
       Variables: {
@@ -600,7 +618,6 @@ test('invalidation can happen without distributionPaths provided', () => {
       Ref: 'DistributionCFDistribution882A7313',
     },
   });
-
 });
 
 test('fails if distribution paths provided but not distribution ID', () => {
@@ -614,7 +631,6 @@ test('fails if distribution paths provided but not distribution ID', () => {
     destinationBucket: bucket,
     distributionPaths: ['/images/*'],
   })).toThrow(/Distribution must be specified if distribution paths are specified/);
-
 });
 
 test('fails if distribution paths don\'t start with "/"', () => {
@@ -849,7 +865,6 @@ test('ephemeralStorageSize can be used to specify the storage size for the deplo
 });
 
 test('deployment allows custom role to be supplied', () => {
-
   // GIVEN
   const stack = new cdk.Stack();
   const bucket = new s3.Bucket(stack, 'Dest');
@@ -878,7 +893,6 @@ test('deployment allows custom role to be supplied', () => {
 });
 
 test('deploy without deleting missing files from destination', () => {
-
   // GIVEN
   const stack = new cdk.Stack();
   const bucket = new s3.Bucket(stack, 'Dest');
@@ -913,7 +927,6 @@ test('deploy with excluded files from destination', () => {
 });
 
 test('deploy with included files from destination', () => {
-
   // GIVEN
   const stack = new cdk.Stack();
   const bucket = new s3.Bucket(stack, 'Dest');
@@ -931,7 +944,6 @@ test('deploy with included files from destination', () => {
 });
 
 test('deploy with excluded and included files from destination', () => {
-
   // GIVEN
   const stack = new cdk.Stack();
   const bucket = new s3.Bucket(stack, 'Dest');
@@ -951,7 +963,6 @@ test('deploy with excluded and included files from destination', () => {
 });
 
 test('deploy with multiple exclude and include filters', () => {
-
   // GIVEN
   const stack = new cdk.Stack();
   const bucket = new s3.Bucket(stack, 'Dest');
@@ -1036,7 +1047,6 @@ test('given a source with markers and extract is false, BucketDeployment throws 
 });
 
 test('deployment allows vpc to be implicitly supplied to lambda', () => {
-
   // GIVEN
   const stack = new cdk.Stack();
   const bucket = new s3.Bucket(stack, 'Dest');
@@ -1073,7 +1083,6 @@ test('deployment allows vpc to be implicitly supplied to lambda', () => {
 });
 
 test('deployment allows vpc and subnets to be implicitly supplied to lambda', () => {
-
   // GIVEN
   const stack = new cdk.Stack();
   const bucket = new s3.Bucket(stack, 'Dest');
@@ -1203,7 +1212,6 @@ test('using deployment bucket references the destination bucket by means of the 
 });
 
 test('resource id includes memory and vpc', () => {
-
   // GIVEN
   const stack = new cdk.Stack();
   const bucket = new s3.Bucket(stack, 'Dest');
@@ -1228,7 +1236,6 @@ test('resource id includes memory and vpc', () => {
 });
 
 test('bucket includes custom resource owner tag', () => {
-
   // GIVEN
   const stack = new cdk.Stack();
   const bucket = new s3.Bucket(stack, 'Dest');
@@ -1253,7 +1260,6 @@ test('bucket includes custom resource owner tag', () => {
 });
 
 test('throws if destinationKeyPrefix is too long', () => {
-
   // GIVEN
   const stack = new cdk.Stack();
   const bucket = new s3.Bucket(stack, 'Dest');
@@ -1265,11 +1271,9 @@ test('throws if destinationKeyPrefix is too long', () => {
     destinationKeyPrefix: '/this/is/a/random/key/prefix/that/is/a/lot/of/characters/do/we/think/that/it/will/ever/be/this/long??????',
     memoryLimit: 256,
   })).toThrow(/The BucketDeployment construct requires that/);
-
 });
 
 test('skips destinationKeyPrefix validation if token', () => {
-
   // GIVEN
   const stack = new cdk.Stack();
   const bucket = new s3.Bucket(stack, 'Dest');
@@ -1287,11 +1291,9 @@ test('skips destinationKeyPrefix validation if token', () => {
   Template.fromStack(stack).hasResourceProperties('Custom::CDKBucketDeployment', {
     DestinationBucketKeyPrefix: 5,
   });
-
 });
 
 test('bucket has multiple deployments', () => {
-
   // GIVEN
   const stack = new cdk.Stack();
   const bucket = new s3.Bucket(stack, 'Dest');
@@ -1358,6 +1360,7 @@ test('"SourceMarkers" is not included if none of the sources have markers', () =
     'SourceObjectKeys',
     'DestinationBucketName',
     'Prune',
+    'OutputObjectKeys',
   ]);
 });
 
@@ -1522,6 +1525,29 @@ test('DeployTimeSubstitutedFile can be used to add substitutions in a file', () 
   expect(content).toContain('changedMockTypeSuccess');
 });
 
+test('DeployTimeSubstitutedFile can be used to add substitutions in a file with a defined destination key', () => {
+  const app = new cdk.App();
+  const stack = new cdk.Stack(app, 'Test');
+  const bucket = new s3.Bucket(stack, 'Bucket');
+  const destinationKey = 'helloworld.yaml';
+  new s3deploy.DeployTimeSubstitutedFile(stack, 'MyFile', {
+    source: path.join(__dirname, 'file-substitution-test', 'sample-definition.yaml'),
+    destinationKey: destinationKey,
+    destinationBucket: bucket,
+    substitutions: {
+      testMethod: 'changedTestMethodSuccess',
+      mock: 'changedMockTypeSuccess',
+    },
+  });
+
+  const result = app.synth();
+  const content = readDataFile(result, destinationKey);
+  expect(content).not.toContain('testMethod');
+  expect(content).toContain('changedTestMethodSuccess');
+  expect(content).not.toContain('mock');
+  expect(content).toContain('changedMockTypeSuccess');
+});
+
 test('DeployTimeSubstitutedFile throws error when source file path is invalid', () => {
   const app = new cdk.App();
   const stack = new cdk.Stack(app, 'Test');
@@ -1636,5 +1662,62 @@ function readDataFile(casm: cxapi.CloudAssembly, relativePath: string): string {
     }
   }
 
-  throw new Error(`File ${relativePath} not found in any of the assets of the assembly`);
+  throw new UnscopedValidationError(`File ${relativePath} not found in any of the assets of the assembly`);
 }
+
+test('DeployTimeSubstitutedFile allows custom role to be supplied', () => {
+  const app = new cdk.App();
+  const stack = new cdk.Stack(app, 'Test');
+  const bucket = new s3.Bucket(stack, 'Bucket');
+  const existingRole = new iam.Role(stack, 'Role', {
+    assumedBy: new iam.ServicePrincipal('lambda.amazon.com'),
+  });
+
+  new s3deploy.DeployTimeSubstitutedFile(stack, 'MyFile', {
+    source: path.join(__dirname, 'file-substitution-test', 'sample-definition.yaml'),
+    destinationBucket: bucket,
+    substitutions: {
+      testMethod: 'changedTestMethodSuccess',
+      mock: 'changedMockTypeSuccess',
+    },
+    role: existingRole,
+  });
+
+  Template.fromStack(stack).resourceCountIs('AWS::IAM::Role', 1);
+  Template.fromStack(stack).resourceCountIs('AWS::Lambda::Function', 1);
+  Template.fromStack(stack).hasResourceProperties('AWS::Lambda::Function', {
+    Role: {
+      'Fn::GetAtt': [
+        'Role1ABCC5F0',
+        'Arn',
+      ],
+    },
+  });
+});
+
+test('outputObjectKeys to control SourceObjectKeys being sent back', () => {
+  const stack = new cdk.Stack();
+  const bucket = new s3.Bucket(stack, 'Dest');
+  new s3deploy.BucketDeployment(stack, 'Deploy', {
+    sources: [s3deploy.Source.asset(path.join(__dirname, 'my-website'))],
+    destinationBucket: bucket,
+    outputObjectKeys: false,
+  });
+
+  Template.fromStack(stack).hasResourceProperties('Custom::CDKBucketDeployment', {
+    OutputObjectKeys: false,
+  });
+});
+
+test('outputObjectKeys default value is true', () => {
+  const stack = new cdk.Stack();
+  const bucket = new s3.Bucket(stack, 'Dest');
+  new s3deploy.BucketDeployment(stack, 'Deploy', {
+    sources: [s3deploy.Source.asset(path.join(__dirname, 'my-website'))],
+    destinationBucket: bucket,
+  });
+
+  Template.fromStack(stack).hasResourceProperties('Custom::CDKBucketDeployment', {
+    OutputObjectKeys: true,
+  });
+});

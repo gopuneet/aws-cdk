@@ -15,9 +15,12 @@ module.exports = {
   plugins: [
     '@typescript-eslint',
     'import',
-    '@aws-cdk',
+    '@cdklabs',
+    '@stylistic',
     'jest',
+    "jsdoc",
   ],
+  overrides: [],
   parser: '@typescript-eslint/parser',
   parserOptions: {
     ecmaVersion: '2018',
@@ -41,17 +44,24 @@ module.exports = {
   },
   ignorePatterns: ['*.js', '*.d.ts', 'node_modules/', '*.generated.ts'],
   rules: {
-    '@aws-cdk/no-core-construct': ['error'],
-    '@aws-cdk/no-qualified-construct': ['error'],
-    '@aws-cdk/invalid-cfn-imports': ['error'],
-    '@aws-cdk/no-literal-partition': ['error'],
+    '@cdklabs/no-core-construct': ['error'],
+    '@cdklabs/invalid-cfn-imports': ['error'],
+    '@cdklabs/no-literal-partition': ['error'],
+    '@cdklabs/no-invalid-path': [ 'error' ],
+    '@cdklabs/promiseall-no-unbounded-parallelism': [ 'error' ],
+
+    // Error handling
+    'no-throw-literal': [ 'error' ],
+
     // Require use of the `import { foo } from 'bar';` form instead of `import foo = require('bar');`
     '@typescript-eslint/no-require-imports': ['error'],
-    '@typescript-eslint/indent': ['error', 2],
+    '@stylistic/indent': ['error', 2],
 
     // Style
     'quotes': ['error', 'single', { avoidEscape: true }],
-    'comma-dangle': ['error', 'always-multiline'], // ensures clean diffs, see https://medium.com/@nikgraf/why-you-should-enforce-dangling-commas-for-multiline-statements-d034c98e36f8
+    '@stylistic/member-delimiter-style': ['error'], // require semicolon delimiter
+    '@stylistic/comma-dangle': ['error', 'always-multiline'], // ensures clean diffs, see https://medium.com/@nikgraf/why-you-should-enforce-dangling-commas-for-multiline-statements-d034c98e36f8
+    '@stylistic/no-extra-semi': ['error'], // no extra semicolons
     'comma-spacing': ['error', { before: false, after: true }], // space after, no space before
     'no-multi-spaces': ['error', { ignoreEOLComments: false }], // no multi spaces
     'array-bracket-spacing': ['error', 'never'], // [1, 2, 3]
@@ -63,6 +73,15 @@ module.exports = {
     'brace-style': ['error', '1tbs', { allowSingleLine: true }], // enforce one true brace style
     'space-before-blocks': 'error', // require space before blocks
     'curly': ['error', 'multi-line', 'consistent'], // require curly braces for multiline control statements
+    'eol-last': ['error', 'always'], // require a newline a the end of files
+    '@stylistic/spaced-comment': ['error', 'always', { 'exceptions': ['/', '*'], 'markers': ['/'] }], // require a whitespace at the beginninng of each comment
+    '@stylistic/padded-blocks': ['error', { 'classes': 'never', 'blocks': 'never', 'switches': 'never'}],
+
+    // JSDoc
+    'jsdoc/require-param-description': ['error'],
+    'jsdoc/require-property-description': ['error'],
+    'jsdoc/require-returns-description': ['error'],
+    'jsdoc/check-alignment': ['error'],
 
     // Require all imported dependencies are actually declared in package.json
     'import/no-extraneous-dependencies': [
@@ -73,7 +92,6 @@ module.exports = {
           '**/test/**', // --> Unit tests
         ],
         optionalDependencies: false, // Disallow importing optional dependencies (those shouldn't be in use in the project)
-        peerDependencies: false, // Disallow importing peer dependencies (that aren't also direct dependencies)
       },
     ],
 
@@ -214,5 +232,7 @@ module.exports = {
     "jest/valid-expect": "off", // expect from '@aws-cdk/assert' can take a second argument
     "jest/valid-title": "off", // A little over-zealous with test('test foo') being an error.
     "jest/no-identical-title": "off", // TEMPORARY - Disabling this until https://github.com/jest-community/eslint-plugin-jest/issues/836 is resolved
+    'jest/no-disabled-tests': 'error', // Skipped tests are easily missed in PR reviews
+    'jest/no-focused-tests': 'error', // Focused tests are easily missed in PR reviews
   },
 };

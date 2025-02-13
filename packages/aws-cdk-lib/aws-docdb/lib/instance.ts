@@ -3,8 +3,10 @@ import { IDatabaseCluster } from './cluster-ref';
 import { CfnDBInstance } from './docdb.generated';
 import { Endpoint } from './endpoint';
 import * as ec2 from '../../aws-ec2';
+import { CaCertificate } from '../../aws-rds';
 import { ArnFormat } from '../../core';
 import * as cdk from '../../core';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
 
 /**
  * A database instance
@@ -164,7 +166,7 @@ export interface DatabaseInstanceProps {
    *
    * @default RemovalPolicy.Retain
    */
-  readonly removalPolicy?: cdk.RemovalPolicy
+  readonly removalPolicy?: cdk.RemovalPolicy;
 
   /**
    * A value that indicates whether to enable Performance Insights for the DB Instance.
@@ -172,6 +174,17 @@ export interface DatabaseInstanceProps {
    * @default - false
    */
   readonly enablePerformanceInsights?: boolean;
+
+  /**
+   * The identifier of the CA certificate for this DB instance.
+   *
+   * Specifying or updating this property triggers a reboot.
+   *
+   * @see https://docs.aws.amazon.com/documentdb/latest/developerguide/ca_cert_rotation.html
+   *
+   * @default - DocumentDB will choose a certificate authority
+   */
+  readonly caCertificate?: CaCertificate;
 }
 
 /**
@@ -207,12 +220,15 @@ export class DatabaseInstance extends DatabaseInstanceBase implements IDatabaseI
 
   constructor(scope: Construct, id: string, props: DatabaseInstanceProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const instance = new CfnDBInstance(this, 'Resource', {
       dbClusterIdentifier: props.cluster.clusterIdentifier,
       dbInstanceClass: `db.${props.instanceType}`,
       autoMinorVersionUpgrade: props.autoMinorVersionUpgrade ?? true,
       availabilityZone: props.availabilityZone,
+      caCertificateIdentifier: props.caCertificate ? props.caCertificate.toString() : undefined,
       dbInstanceIdentifier: props.dbInstanceName,
       preferredMaintenanceWindow: props.preferredMaintenanceWindow,
       enablePerformanceInsights: props.enablePerformanceInsights,

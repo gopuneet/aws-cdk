@@ -26,7 +26,6 @@ export interface ApplicationMultipleTargetGroupsFargateServiceProps extends Appl
  * A Fargate service running on an ECS cluster fronted by an application load balancer.
  */
 export class ApplicationMultipleTargetGroupsFargateService extends ApplicationMultipleTargetGroupsServiceBase {
-
   /**
    * Determines whether the service will be assigned a public IP address.
    */
@@ -65,6 +64,7 @@ export class ApplicationMultipleTargetGroupsFargateService extends ApplicationMu
       this.taskDefinition = new FargateTaskDefinition(this, 'TaskDef', {
         memoryLimitMiB: props.memoryLimitMiB,
         cpu: props.cpu,
+        ephemeralStorageGiB: props.ephemeralStorageGiB,
         executionRole: taskImageOptions.executionRole,
         taskRole: taskImageOptions.taskRole,
         family: taskImageOptions.family,

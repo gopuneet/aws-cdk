@@ -4,9 +4,9 @@ import { App, Stack } from 'aws-cdk-lib';
 import * as integ from '@aws-cdk/integ-tests-alpha';
 import { getClusterVersionConfig } from './integ-tests-kubernetes-version';
 import * as eks from 'aws-cdk-lib/aws-eks';
+import { IAM_OIDC_REJECT_UNAUTHORIZED_CONNECTIONS } from 'aws-cdk-lib/cx-api';
 
 class EksClusterInferenceStack extends Stack {
-
   constructor(scope: App, id: string) {
     super(scope, id);
 
@@ -25,13 +25,24 @@ class EksClusterInferenceStack extends Stack {
       instanceType: new ec2.InstanceType('inf1.2xlarge'),
       minCapacity: 1,
     });
+
+    cluster.addAutoScalingGroupCapacity('Inference2Instances', {
+      instanceType: new ec2.InstanceType('inf2.xlarge'),
+      minCapacity: 1,
+    });
   }
 }
 
-const app = new App();
-const stack = new EksClusterInferenceStack(app, 'aws-cdk-eks-cluster-inference-test');
-new integ.IntegTest(app, 'aws-cdk-eks-cluster-interence', {
+const app = new App({
+  postCliContext: {
+    [IAM_OIDC_REJECT_UNAUTHORIZED_CONNECTIONS]: false,
+  },
+});
+const stack = new EksClusterInferenceStack(app, 'aws-cdk-eks-cluster-inference');
+new integ.IntegTest(app, 'aws-cdk-eks-cluster-interence-integ', {
   testCases: [stack],
+  // Test includes assets that are updated weekly. If not disabled, the upgrade PR will fail.
+  diffAssets: false,
   cdkCommandOptions: {
     deploy: {
       args: {

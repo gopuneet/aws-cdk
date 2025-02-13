@@ -1,5 +1,6 @@
 import { Construct } from 'constructs';
 import { Annotations, Duration } from '../../core';
+import { UnscopedValidationError } from '../../core/lib/errors';
 
 /**
  * Schedule for scheduled scaling actions
@@ -21,12 +22,12 @@ export abstract class Schedule {
     if (duration.isUnresolved()) {
       const validDurationUnit = ['minute', 'minutes', 'hour', 'hours', 'day', 'days'];
       if (!validDurationUnit.includes(duration.unitLabel())) {
-        throw new Error("Allowed units for scheduling are: 'minute', 'minutes', 'hour', 'hours', 'day' or 'days'");
+        throw new UnscopedValidationError("Allowed units for scheduling are: 'minute', 'minutes', 'hour', 'hours', 'day' or 'days'");
       }
       return new LiteralSchedule(`rate(${duration.formatTokenToNumber()})`);
     }
     if (duration.toSeconds() === 0) {
-      throw new Error('Duration cannot be 0');
+      throw new UnscopedValidationError('Duration cannot be 0');
     }
 
     let rate = maybeRate(duration.toDays({ integral: false }), 'day');
@@ -47,7 +48,7 @@ export abstract class Schedule {
    */
   public static cron(options: CronOptions): Schedule {
     if (options.weekDay !== undefined && options.day !== undefined) {
-      throw new Error('Cannot supply both \'day\' and \'weekDay\', use at most one');
+      throw new UnscopedValidationError('Cannot supply both \'day\' and \'weekDay\', use at most one');
     }
 
     const minute = fallback(options.minute, '*');
@@ -63,7 +64,7 @@ export abstract class Schedule {
       public readonly expressionString: string = `cron(${minute} ${hour} ${day} ${month} ${weekDay} ${year})`;
       public _bind(scope: Construct) {
         if (!options.minute) {
-          Annotations.of(scope).addWarning('cron: If you don\'t pass \'minute\', by default the event runs every minute. Pass \'minute: \'*\'\' if that\'s what you intend, or \'minute: 0\' to run once per hour instead.');
+          Annotations.of(scope).addWarningV2('@aws-cdk/aws-applicationautoscaling:defaultRunEveryMinute', 'cron: If you don\'t pass \'minute\', by default the event runs every minute. Pass \'minute: \'*\'\' if that\'s what you intend, or \'minute: 0\' to run once per hour instead.');
         }
         return new LiteralSchedule(this.expressionString);
       }

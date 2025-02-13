@@ -2,7 +2,13 @@ import { Construct } from 'constructs';
 import { CfnNetworkAcl, CfnNetworkAclEntry, CfnSubnetNetworkAclAssociation } from './ec2.generated';
 import { AclCidr, AclTraffic } from './network-acl-types';
 import { ISubnet, IVpc, SubnetSelection } from './vpc';
-import { IResource, Resource } from '../../core';
+import { IResource, Resource, Tags } from '../../core';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
+
+/**
+ * Name tag constant
+ */
+const NAME_TAG: string = 'Name';
 
 /**
  * A NetworkAcl
@@ -39,7 +45,6 @@ abstract class NetworkAclBase extends Resource implements INetworkAcl {
       ...options,
     });
   }
-
 }
 
 /**
@@ -51,10 +56,9 @@ export interface NetworkAclProps {
   /**
    * The name of the NetworkAcl.
    *
-   * It is not recommended to use an explicit name.
+   * Since the NetworkAcl resource doesn't support providing a physical name, the value provided here will be recorded in the `Name` tag.
    *
-   * @default If you don't specify a networkAclName, AWS CloudFormation generates a
-   * unique physical ID and uses that ID for the group name.
+   * @default CDK generated name
    */
   readonly networkAclName?: string;
 
@@ -112,11 +116,13 @@ export class NetworkAcl extends NetworkAclBase {
   private readonly vpc: IVpc;
 
   constructor(scope: Construct, id: string, props: NetworkAclProps) {
-    super(scope, id, {
-      physicalName: props.networkAclName,
-    });
+    super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.vpc = props.vpc;
+
+    Tags.of(this).add(NAME_TAG, props.networkAclName || this.node.path);
 
     this.networkAcl = new CfnNetworkAcl(this, 'Resource', {
       vpcId: props.vpc.vpcId,
@@ -133,6 +139,7 @@ export class NetworkAcl extends NetworkAclBase {
   /**
    * Associate the ACL with a given set of subnets
    */
+  @MethodMetadata()
   public associateWithSubnet(id: string, selection: SubnetSelection) {
     const subnets = this.vpc.selectSubnets(selection);
     for (const subnet of subnets.subnets) {
@@ -167,7 +174,7 @@ export interface INetworkAclEntry extends IResource {
   /**
    * The network ACL.
    */
-  readonly networkAcl: INetworkAcl
+  readonly networkAcl: INetworkAcl;
 
 }
 
@@ -271,6 +278,8 @@ export class NetworkAclEntry extends NetworkAclEntryBase {
     super(scope, id, {
       physicalName: props.networkAclEntryName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.networkAcl = props.networkAcl;
 
@@ -370,6 +379,8 @@ export class SubnetNetworkAclAssociation extends SubnetNetworkAclAssociationBase
     super(scope, id, {
       physicalName: props.subnetNetworkAclAssociationName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     this.association = new CfnSubnetNetworkAclAssociation(this, 'Resource', {
       networkAclId: props.networkAcl.networkAclId,

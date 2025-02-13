@@ -1,6 +1,7 @@
 import { Construct } from 'constructs';
 import { NetworkMode, TaskDefinition } from './base/task-definition';
 import { ContainerImage, ContainerImageConfig } from './container-image';
+import { CredentialSpec, CredentialSpecConfig } from './credential-spec';
 import { CfnTaskDefinition } from './ecs.generated';
 import { EnvironmentFile, EnvironmentFileConfig } from './environment-file';
 import { LinuxParameters } from './linux-parameters';
@@ -125,6 +126,17 @@ export interface ContainerDefinitionOptions {
    * @default - CMD value built into container image.
    */
   readonly command?: string[];
+
+  /**
+   * A list of ARNs in SSM or Amazon S3 to a credential spec (`CredSpec`) file that configures the container for Active Directory authentication.
+   *
+   * We recommend that you use this parameter instead of the `dockerSecurityOptions`.
+   *
+   * Currently, only one credential spec is allowed per container definition.
+   *
+   * @default - No credential specs.
+   */
+  readonly credentialSpecs?: CredentialSpec[];
 
   /**
    * The minimum number of CPU units to reserve for the container.
@@ -252,6 +264,14 @@ export interface ContainerDefinitionOptions {
   readonly hostname?: string;
 
   /**
+   * When this parameter is true, you can deploy containerized applications that require stdin or a tty to be allocated.
+   *
+   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ecs-taskdefinition-containerdefinition.html#cfn-ecs-taskdefinition-containerdefinition-interactive
+   * @default - false
+   */
+  readonly interactive?: boolean;
+
+  /**
    * The amount (in MiB) of memory to present to the container.
    *
    * If your container attempts to exceed the allocated memory, the container
@@ -294,11 +314,25 @@ export interface ContainerDefinitionOptions {
   readonly readonlyRootFilesystem?: boolean;
 
   /**
-   * The user name to use inside the container.
+   * The user to use inside the container. This parameter maps to User in the Create a container section of the Docker Remote API and the --user option to docker run.
    *
+   * @see https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_definition_parameters.html#ContainerDefinition-user
    * @default root
    */
   readonly user?: string;
+
+  /**
+   * Specifies whether Amazon ECS will resolve the container image tag provided
+   * in the container definition to an image digest.
+   *
+   * If you set the value for a container as disabled, Amazon ECS will
+   * not resolve the provided container image tag to a digest and will use the
+   * original image URI specified in the container definition for deployment.
+   *
+   * @default VersionConsistency.DISABLED if `image` is a CDK asset, VersionConsistency.ENABLED otherwise
+   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ecs-taskdefinition-containerdefinition.html#cfn-ecs-taskdefinition-containerdefinition-versionconsistency
+   */
+  readonly versionConsistency?: VersionConsistency;
 
   /**
    * The working directory in which to run commands inside the container.
@@ -363,6 +397,42 @@ export interface ContainerDefinitionOptions {
    * An array of ulimits to set in the container.
    */
   readonly ulimits?: Ulimit[];
+
+  /**
+   * Enable a restart policy for a container.
+   *
+   * When you set up a restart policy, Amazon ECS can restart the container without needing to replace the task.
+   *
+   * @default - false unless `restartIgnoredExitCodes` or `restartAttemptPeriod` is set.
+   * @see https://docs.aws.amazon.com/AmazonECS/latest/developerguide/container-restart-policy.html
+   */
+  readonly enableRestartPolicy?: boolean;
+
+  /**
+   * A list of exit codes that Amazon ECS will ignore and not attempt a restart on.
+   *
+   * This property can't be used if `enableRestartPolicy` is set to false.
+   *
+   * You can specify a maximum of 50 container exit codes.
+   *
+   * @default - No exit codes are ignored.
+   */
+  readonly restartIgnoredExitCodes?: number[];
+
+  /**
+   * A period of time that the container must run for before a restart can be attempted.
+   *
+   * A container can be restarted only once every `restartAttemptPeriod` seconds.
+   * If a container isn't able to run for this time period and exits early, it will not be restarted.
+   *
+   * This property can't be used if `enableRestartPolicy` is set to false.
+   *
+   * You can set a minimum `restartAttemptPeriod` of 60 seconds and a maximum `restartAttemptPeriod`
+   * of 1800 seconds.
+   *
+   * @default - Duration.seconds(300) if `enableRestartPolicy` is true, otherwise no period.
+   */
+  readonly restartAttemptPeriod?: cdk.Duration;
 }
 
 /**
@@ -381,6 +451,8 @@ export interface ContainerDefinitionProps extends ContainerDefinitionOptions {
  * A container definition is used in a task definition to describe the containers that are launched as part of a task.
  */
 export class ContainerDefinition extends Construct {
+  public static readonly CONTAINER_PORT_USE_RANGE = 0;
+
   /**
    * The Linux-specific modifications that are applied to the container, such as Linux kernel capabilities.
    */
@@ -450,6 +522,11 @@ export class ContainerDefinition extends Construct {
   public readonly logDriverConfig?: LogDriverConfig;
 
   /**
+   * The crdential specifications for this container.
+   */
+  public readonly credentialSpecs?: CredentialSpecConfig[];
+
+  /**
    * The name of the image referenced by this container.
    */
   public readonly imageName: string;
@@ -478,9 +555,13 @@ export class ContainerDefinition extends Construct {
 
   private readonly secrets: CfnTaskDefinition.SecretProperty[] = [];
 
+  private readonly dockerLabels: { [key: string]: string };
+
   private readonly environment: { [key: string]: string };
 
   private _namedPorts: Map<string, PortMapping>;
+
+  private versionConsistency?: VersionConsistency;
 
   /**
    * Constructs a new instance of the ContainerDefinition class.
@@ -503,6 +584,8 @@ export class ContainerDefinition extends Construct {
 
     this._namedPorts = new Map<string, PortMapping>();
 
+    this.versionConsistency = props.versionConsistency;
+
     if (props.logging) {
       this.logDriverConfig = props.logging.bind(this, this);
     }
@@ -512,6 +595,8 @@ export class ContainerDefinition extends Construct {
         this.addSecret(name, secret);
       }
     }
+
+    this.dockerLabels = { ...props.dockerLabels };
 
     if (props.environment) {
       this.environment = { ...props.environment };
@@ -524,6 +609,18 @@ export class ContainerDefinition extends Construct {
 
       for (const environmentFile of props.environmentFiles) {
         this.environmentFiles.push(environmentFile.bind(this));
+      }
+    }
+
+    if (props.credentialSpecs) {
+      this.credentialSpecs = [];
+
+      if (props.credentialSpecs.length > 1) {
+        throw new Error('Only one credential spec is allowed per container definition.');
+      }
+
+      for (const credSpec of props.credentialSpecs) {
+        this.credentialSpecs.push(credSpec.bind());
       }
     }
 
@@ -546,6 +643,8 @@ export class ContainerDefinition extends Construct {
     if (props.ulimits) {
       this.addUlimits(...props.ulimits);
     }
+
+    this.validateRestartPolicy(props.enableRestartPolicy, props.restartIgnoredExitCodes, props.restartAttemptPeriod);
   }
 
   /**
@@ -617,6 +716,13 @@ export class ContainerDefinition extends Construct {
    */
   public addEnvironment(name: string, value: string) {
     this.environment[name] = value;
+  }
+
+  /**
+   * This method adds a Docker label to the container.
+   */
+  public addDockerLabel(name: string, value: string) {
+    this.dockerLabels[name] = value;
   }
 
   /**
@@ -706,16 +812,30 @@ export class ContainerDefinition extends Construct {
   }
 
   /**
-   * Set HostPort to 0 When netowork mode is Brdige
+   * This method sets the host port to 0 if the network mode is Bridge and neither
+   * the host port nor the container port range is already set.
    */
   private addHostPortIfNeeded(pm: PortMapping) :PortMapping {
-    const newPM = {
+    if (this.taskDefinition.networkMode !== NetworkMode.BRIDGE || pm.hostPort !== undefined || pm.containerPortRange !== undefined) {
+      return pm;
+    }
+
+    return {
       ...pm,
+      hostPort: 0,
     };
-    if (this.taskDefinition.networkMode !== NetworkMode.BRIDGE) return newPM;
-    if (pm.hostPort !== undefined) return newPM;
-    newPM.hostPort = 0;
-    return newPM;
+  }
+
+  private validateRestartPolicy(enableRestartPolicy?: boolean, restartIgnoredExitCodes?: number[], restartAttemptPeriod?: cdk.Duration) {
+    if (enableRestartPolicy === false && (restartIgnoredExitCodes !== undefined || restartAttemptPeriod !== undefined)) {
+      throw new Error('The restartIgnoredExitCodes and restartAttemptPeriod cannot be specified if enableRestartPolicy is false');
+    }
+    if (restartIgnoredExitCodes && restartIgnoredExitCodes.length > 50) {
+      throw new Error(`Only up to 50 can be specified for restartIgnoredExitCodes, got: ${restartIgnoredExitCodes.length}`);
+    }
+    if (restartAttemptPeriod && (restartAttemptPeriod.toSeconds() < 60 || restartAttemptPeriod.toSeconds() > 1800)) {
+      throw new Error(`The restartAttemptPeriod must be between 60 seconds and 1800 seconds, got ${restartAttemptPeriod.toSeconds()} seconds`);
+    }
   }
 
   /**
@@ -749,6 +869,11 @@ export class ContainerDefinition extends Construct {
     if (this.taskDefinition.networkMode === NetworkMode.BRIDGE) {
       return 0;
     }
+
+    if (defaultPortMapping.containerPortRange !== undefined) {
+      throw new Error(`The first port mapping of the container ${this.containerName} must expose a single port.`);
+    }
+
     return defaultPortMapping.containerPort;
   }
 
@@ -760,7 +885,29 @@ export class ContainerDefinition extends Construct {
       throw new Error(`Container ${this.containerName} hasn't defined any ports. Call addPortMappings().`);
     }
     const defaultPortMapping = this.portMappings[0];
+
+    if (defaultPortMapping.containerPortRange !== undefined) {
+      throw new Error(`The first port mapping of the container ${this.containerName} must expose a single port.`);
+    }
+
     return defaultPortMapping.containerPort;
+  }
+
+  /**
+   * Allows disabling version consistency if the user did not specify a value.
+   *
+   * Intended for CDK asset images, as asset images are tagged based upon a hash
+   * of image inputs, meaning the image won't change if the tag didn't change,
+   * making version consistency for such containers a waste of time. Literally,
+   * as version consistency can only be achieved by slowing down deployments.
+   *
+   * @see https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-type-ecs.html#deployment-container-image-stability
+   * @internal
+   */
+  public _defaultDisableVersionConsistency() {
+    if (!this.versionConsistency) {
+      this.versionConsistency = VersionConsistency.DISABLED;
+    }
   }
 
   /**
@@ -771,17 +918,19 @@ export class ContainerDefinition extends Construct {
   public renderContainerDefinition(_taskDefinition?: TaskDefinition): CfnTaskDefinition.ContainerDefinitionProperty {
     return {
       command: this.props.command,
+      credentialSpecs: this.credentialSpecs && this.credentialSpecs.map(renderCredentialSpec),
       cpu: this.props.cpu,
       disableNetworking: this.props.disableNetworking,
       dependsOn: cdk.Lazy.any({ produce: () => this.containerDependencies.map(renderContainerDependency) }, { omitEmptyArray: true }),
       dnsSearchDomains: this.props.dnsSearchDomains,
       dnsServers: this.props.dnsServers,
-      dockerLabels: this.props.dockerLabels,
+      dockerLabels: Object.keys(this.dockerLabels).length ? this.dockerLabels : undefined,
       dockerSecurityOptions: this.props.dockerSecurityOptions,
       entryPoint: this.props.entryPoint,
       essential: this.essential,
       hostname: this.props.hostname,
       image: this.imageConfig.imageName,
+      interactive: this.props.interactive,
       memory: this.props.memoryLimitMiB,
       memoryReservation: this.props.memoryReservationMiB,
       mountPoints: cdk.Lazy.any({ produce: () => this.mountPoints.map(renderMountPoint) }, { omitEmptyArray: true }),
@@ -795,6 +944,7 @@ export class ContainerDefinition extends Construct {
       stopTimeout: this.props.stopTimeout && this.props.stopTimeout.toSeconds(),
       ulimits: cdk.Lazy.any({ produce: () => this.ulimits.map(renderUlimit) }, { omitEmptyArray: true }),
       user: this.props.user,
+      versionConsistency: this.versionConsistency,
       volumesFrom: cdk.Lazy.any({ produce: () => this.volumesFrom.map(renderVolumeFrom) }, { omitEmptyArray: true }),
       workingDirectory: this.props.workingDirectory,
       logConfiguration: this.logDriverConfig,
@@ -808,6 +958,7 @@ export class ContainerDefinition extends Construct {
       resourceRequirements: (!this.props.gpuCount && this.inferenceAcceleratorResources.length == 0 ) ? undefined :
         renderResourceRequirements(this.props.gpuCount, this.inferenceAcceleratorResources),
       systemControls: this.props.systemControls && renderSystemControls(this.props.systemControls),
+      restartPolicy: renderRestartPolicy(this.props.enableRestartPolicy, this.props.restartIgnoredExitCodes, this.props.restartAttemptPeriod),
     };
   }
 }
@@ -888,6 +1039,14 @@ function renderEnvironmentFiles(partition: string, environmentFiles: Environment
   return ret;
 }
 
+function renderCredentialSpec(credSpec: CredentialSpecConfig): string {
+  if (!credSpec.location) {
+    throw Error('CredentialSpec must specify a valid location or ARN');
+  }
+
+  return `${credSpec.typePrefix}:${credSpec.location}`;
+}
+
 function renderHealthCheck(hc: HealthCheck): CfnTaskDefinition.HealthCheckProperty {
   if (hc.interval?.toSeconds() !== undefined) {
     if (5 > hc.interval?.toSeconds() || hc.interval?.toSeconds() > 300) {
@@ -964,17 +1123,17 @@ export interface Ulimit {
    *
    * For more information, see [UlimitName](https://docs.aws.amazon.com/cdk/api/latest/typescript/api/aws-ecs/ulimitname.html#aws_ecs_UlimitName).
    */
-  readonly name: UlimitName,
+  readonly name: UlimitName;
 
   /**
    * The soft limit for the ulimit type.
    */
-  readonly softLimit: number,
+  readonly softLimit: number;
 
   /**
    * The hard limit for the ulimit type.
    */
-  readonly hardLimit: number,
+  readonly hardLimit: number;
 }
 
 /**
@@ -995,7 +1154,7 @@ export enum UlimitName {
   RTPRIO = 'rtprio',
   RTTIME = 'rttime',
   SIGPENDING = 'sigpending',
-  STACK = 'stack'
+  STACK = 'stack',
 }
 
 function renderUlimit(ulimit: Ulimit): CfnTaskDefinition.UlimitProperty {
@@ -1071,8 +1230,27 @@ export interface PortMapping {
    *
    * For more information, see hostPort.
    * Port mappings that are automatically assigned in this way do not count toward the 100 reserved ports limit of a container instance.
+   *
+   * If you want to expose a port range, you must specify `CONTAINER_PORT_USE_RANGE` as container port.
    */
   readonly containerPort: number;
+
+  /**
+   * The port number range on the container that's bound to the dynamically mapped host port range.
+   *
+   * The following rules apply when you specify a `containerPortRange`:
+   *
+   * - You must specify `CONTAINER_PORT_USE_RANGE` as `containerPort`
+   * - You must use either the `bridge` network mode or the `awsvpc` network mode.
+   * - The container instance must have at least version 1.67.0 of the container agent and at least version 1.67.0-1 of the `ecs-init` package
+   * - You can specify a maximum of 100 port ranges per container.
+   * - A port can only be included in one port mapping per container.
+   * - You cannot specify overlapping port ranges.
+   * - The first port in the range must be less than last port in the range.
+   *
+   * If you want to expose a single port, you must not set a range.
+   */
+  readonly containerPortRange?: string;
 
   /**
    * The port number on the container instance to reserve for your container.
@@ -1121,7 +1299,6 @@ export interface PortMapping {
  * PortMap ValueObjectClass having by ContainerDefinition
  */
 export class PortMap {
-
   /**
    * The networking mode to use for the containers in the task.
    */
@@ -1145,9 +1322,38 @@ export class PortMap {
     if (!this.isvalidPortName()) {
       throw new Error('Port mapping name cannot be an empty string.');
     }
-    if (!this.isValidPorts()) {
-      const pm = this.portmapping;
-      throw new Error(`Host port (${pm.hostPort}) must be left out or equal to container port ${pm.containerPort} for network mode ${this.networkmode}`);
+
+    if (this.portmapping.containerPort === ContainerDefinition.CONTAINER_PORT_USE_RANGE && this.portmapping.containerPortRange === undefined) {
+      throw new Error(`The containerPortRange must be set when containerPort is equal to ${ContainerDefinition.CONTAINER_PORT_USE_RANGE}`);
+    }
+
+    if (this.portmapping.containerPort !== ContainerDefinition.CONTAINER_PORT_USE_RANGE && this.portmapping.containerPortRange !== undefined) {
+      throw new Error('Cannot set "containerPort" and "containerPortRange" at the same time.');
+    }
+
+    if (this.portmapping.containerPort !== ContainerDefinition.CONTAINER_PORT_USE_RANGE) {
+      if ((this.networkmode === NetworkMode.AWS_VPC || this.networkmode === NetworkMode.HOST)
+          && this.portmapping.hostPort !== undefined && this.portmapping.hostPort !== this.portmapping.containerPort) {
+        throw new Error('The host port must be left out or must be the same as the container port for AwsVpc or Host network mode.');
+      }
+    }
+
+    if (this.portmapping.containerPortRange !== undefined) {
+      if (cdk.Token.isUnresolved(this.portmapping.containerPortRange)) {
+        throw new Error('The value of containerPortRange must be concrete (no Tokens)');
+      }
+
+      if (this.portmapping.hostPort !== undefined) {
+        throw new Error('Cannot set "hostPort" while using a port range for the container.');
+      }
+
+      if (this.networkmode !== NetworkMode.BRIDGE && this.networkmode !== NetworkMode.AWS_VPC) {
+        throw new Error('Either AwsVpc or Bridge network mode is required to set a port range for the container.');
+      }
+
+      if (!/^\d+-\d+$/.test(this.portmapping.containerPortRange)) {
+        throw new Error('The containerPortRange must be a string in the format [start port]-[end port].');
+      }
     }
   }
 
@@ -1157,17 +1363,6 @@ export class PortMap {
     }
     return true;
   }
-
-  private isValidPorts() :boolean {
-    const isAwsVpcMode = this.networkmode == NetworkMode.AWS_VPC;
-    const isHostMode = this.networkmode == NetworkMode.HOST;
-    if (!isAwsVpcMode && !isHostMode) return true;
-    const hostPort = this.portmapping.hostPort;
-    const containerPort = this.portmapping.containerPort;
-    if (containerPort !== hostPort && hostPort !== undefined ) return false;
-    return true;
-  }
-
 }
 
 /**
@@ -1270,7 +1465,8 @@ export class AppProtocol {
 
 function renderPortMapping(pm: PortMapping): CfnTaskDefinition.PortMappingProperty {
   return {
-    containerPort: pm.containerPort,
+    containerPort: pm.containerPort !== ContainerDefinition.CONTAINER_PORT_USE_RANGE ? pm.containerPort : undefined,
+    containerPortRange: pm.containerPortRange,
     hostPort: pm.hostPort,
     protocol: pm.protocol || Protocol.TCP,
     appProtocol: pm.appProtocol?.value,
@@ -1285,42 +1481,48 @@ export interface ScratchSpace {
   /**
    * The path on the container to mount the scratch volume at.
    */
-  readonly containerPath: string,
+  readonly containerPath: string;
   /**
    * Specifies whether to give the container read-only access to the scratch volume.
    *
    * If this value is true, the container has read-only access to the scratch volume.
    * If this value is false, then the container can write to the scratch volume.
    */
-  readonly readOnly: boolean,
-  readonly sourcePath: string,
+  readonly readOnly: boolean;
+  readonly sourcePath: string;
   /**
    * The name of the scratch volume to mount. Must be a volume name referenced in the name parameter of task definition volume.
    */
-  readonly name: string,
+  readonly name: string;
 }
 
 /**
- * The details of data volume mount points for a container.
+ * The base details of where a volume will be mounted within a container
  */
-export interface MountPoint {
+export interface BaseMountPoint {
   /**
    * The path on the container to mount the host volume at.
    */
-  readonly containerPath: string,
+  readonly containerPath: string;
   /**
    * Specifies whether to give the container read-only access to the volume.
    *
    * If this value is true, the container has read-only access to the volume.
    * If this value is false, then the container can write to the volume.
    */
-  readonly readOnly: boolean,
+  readonly readOnly: boolean;
+}
+
+/**
+ * The details of data volume mount points for a container.
+ */
+export interface MountPoint extends BaseMountPoint {
   /**
    * The name of the volume to mount.
    *
    * Must be a volume name referenced in the name parameter of task definition volume.
    */
-  readonly sourceVolume: string,
+  readonly sourceVolume: string;
 }
 
 function renderMountPoint(mp: MountPoint): CfnTaskDefinition.MountPointProperty {
@@ -1332,13 +1534,29 @@ function renderMountPoint(mp: MountPoint): CfnTaskDefinition.MountPointProperty 
 }
 
 /**
+ * State of the container version consistency feature.
+ *
+ * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ecs-taskdefinition-containerdefinition.html#cfn-ecs-taskdefinition-containerdefinition-versionconsistency
+ */
+export enum VersionConsistency {
+  /**
+   * The version consistency feature is enabled for this container.
+   */
+  ENABLED = 'enabled',
+  /**
+   * The version consistency feature is disabled for this container.
+   */
+  DISABLED = 'disabled',
+}
+
+/**
  * The details on a data volume from another container in the same task definition.
  */
 export interface VolumeFrom {
   /**
    * The name of another container within the same task definition from which to mount volumes.
    */
-  readonly sourceContainer: string,
+  readonly sourceContainer: string;
 
   /**
    * Specifies whether the container has read-only access to the volume.
@@ -1346,7 +1564,7 @@ export interface VolumeFrom {
    * If this value is true, the container has read-only access to the volume.
    * If this value is false, then the container can write to the volume.
    */
-  readonly readOnly: boolean,
+  readonly readOnly: boolean;
 }
 
 function renderVolumeFrom(vf: VolumeFrom): CfnTaskDefinition.VolumeFromProperty {
@@ -1376,4 +1594,24 @@ function renderSystemControls(systemControls: SystemControl[]): CfnTaskDefinitio
     namespace: sc.namespace,
     value: sc.value,
   }));
+}
+
+function renderRestartPolicy(
+  enableRestartPolicy?: boolean,
+  restartIgnoredExitCodes?: number[],
+  restartAttemptPeriod?: cdk.Duration,
+): CfnTaskDefinition.RestartPolicyProperty | undefined {
+  if (enableRestartPolicy === undefined && restartIgnoredExitCodes === undefined && restartAttemptPeriod === undefined) {
+    return;
+  }
+
+  return {
+    // If `enableRestartPolicy` is undefined, we know that `restartIgnoredExitCodes` or restartAttemptPeriod is specified
+    // according to the above branch, so we treat `enableRestartPolicy` as true.
+    // The `validateRestartPolicy` function also ensures that `enableRestartPolicy` is not false if `restartIgnoredExitCodes`
+    // or `restartAttemptPeriod` is specified, so there is no conflict.
+    enabled: enableRestartPolicy ?? true,
+    ignoredExitCodes: restartIgnoredExitCodes, // always undefined if `enabled` is false
+    restartAttemptPeriod: restartAttemptPeriod?.toSeconds(), // always undefined if `enabled` is false
+  };
 }

@@ -3,12 +3,36 @@ import { IDatabaseCluster } from './cluster-ref';
 import { IEngine } from './engine';
 import { IDatabaseInstance } from './instance';
 import { engineDescription } from './private/util';
-import { CfnDBProxy, CfnDBProxyTargetGroup } from './rds.generated';
+import { CfnDBProxy, CfnDBProxyTargetGroup, CfnDBInstance } from './rds.generated';
 import * as ec2 from '../../aws-ec2';
 import * as iam from '../../aws-iam';
 import * as secretsmanager from '../../aws-secretsmanager';
 import * as cdk from '../../core';
+import { ValidationError } from '../../core/lib/errors';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
 import * as cxapi from '../../cx-api';
+
+/**
+ * Client password authentication type used by a proxy to log in as a specific database user.
+ */
+export enum ClientPasswordAuthType {
+  /**
+   * MySQL Native Password client authentication type.
+   */
+  MYSQL_NATIVE_PASSWORD = 'MYSQL_NATIVE_PASSWORD',
+  /**
+   * SCRAM SHA 256 client authentication type.
+   */
+  POSTGRES_SCRAM_SHA_256 = 'POSTGRES_SCRAM_SHA_256',
+  /**
+   * PostgreSQL MD5 client authentication type.
+   */
+  POSTGRES_MD5 = 'POSTGRES_MD5',
+  /**
+   * SQL Server Authentication client authentication type.
+   */
+  SQL_SERVER_AUTHENTICATION = 'SQL_SERVER_AUTHENTICATION',
+}
 
 /**
  * SessionPinningFilter
@@ -76,13 +100,14 @@ export class ProxyTarget {
 
     if (!engine) {
       const errorResource = this.dbCluster ?? this.dbInstance;
-      throw new Error(`Could not determine engine for proxy target '${errorResource?.node.path}'. ` +
-        'Please provide it explicitly when importing the resource');
+      throw new ValidationError(`Could not determine engine for proxy target '${errorResource?.node.path}'. ` +
+        'Please provide it explicitly when importing the resource', proxy);
     }
 
     const engineFamily = engine.engineFamily;
     if (!engineFamily) {
-      throw new Error(`Engine '${engineDescription(engine)}' does not support proxies`);
+      throw new ValidationError('RDS proxies require an engine family to be specified on the database cluster or instance. ' +
+        `No family specified for engine '${engineDescription(engine)}'`, proxy);
     }
 
     // allow connecting to the Cluster/Instance from the Proxy
@@ -259,6 +284,13 @@ export interface DatabaseProxyOptions {
    * The VPC to associate with the new proxy.
    */
   readonly vpc: ec2.IVpc;
+
+  /**
+   * Specifies the details of authentication used by a proxy to log in as a specific database user.
+   *
+   * @default - CloudFormation defaults will apply given the specified database engine.
+   */
+  readonly clientPasswordAuthType?: ClientPasswordAuthType;
 }
 
 /**
@@ -268,7 +300,7 @@ export interface DatabaseProxyProps extends DatabaseProxyOptions {
   /**
    * DB proxy target: Instance or Cluster
    */
-  readonly proxyTarget: ProxyTarget
+  readonly proxyTarget: ProxyTarget;
 }
 
 /**
@@ -344,7 +376,7 @@ abstract class DatabaseProxyBase extends cdk.Resource implements IDatabaseProxy 
 
   public grantConnect(grantee: iam.IGrantable, dbUser?: string): iam.Grant {
     if (!dbUser) {
-      throw new Error('For imported Database Proxies, the dbUser is required in grantConnect()');
+      throw new ValidationError('For imported Database Proxies, the dbUser is required in grantConnect()', this);
     }
     const scopeStack = cdk.Stack.of(this);
     const proxyGeneratedId = scopeStack.splitArn(this.dbProxyArn, cdk.ArnFormat.COLON_RESOURCE_NAME).resourceName;
@@ -416,6 +448,8 @@ export class DatabaseProxy extends DatabaseProxyBase
 
   constructor(scope: Construct, id: string, props: DatabaseProxyProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const physicalName = props.dbProxyName || (
       cdk.FeatureFlags.of(this).isEnabled(cxapi.DATABASE_PROXY_UNIQUE_RESOURCE_NAME) ?
@@ -428,6 +462,9 @@ export class DatabaseProxy extends DatabaseProxyBase
 
     for (const secret of props.secrets) {
       secret.grantRead(role);
+      if (secret.encryptionKey) {
+        secret.encryptionKey.grantDecrypt(role);
+      }
     }
 
     const securityGroups = props.securityGroups ?? [
@@ -441,14 +478,17 @@ export class DatabaseProxy extends DatabaseProxyBase
     const bindResult = props.proxyTarget.bind(this);
 
     if (props.secrets.length < 1) {
-      throw new Error('One or more secrets are required.');
+      throw new ValidationError('One or more secrets are required.', this);
     }
     this.secrets = props.secrets;
+
+    this.validateClientPasswordAuthType(bindResult.engineFamily, props.clientPasswordAuthType);
 
     this.resource = new CfnDBProxy(this, 'Resource', {
       auth: props.secrets.map(_ => {
         return {
           authScheme: 'SECRETS',
+          clientPasswordAuthType: props.clientPasswordAuthType,
           iamAuth: props.iamAuth ? 'REQUIRED' : 'DISABLED',
           secretArn: _.secretArn,
         };
@@ -479,7 +519,7 @@ export class DatabaseProxy extends DatabaseProxyBase
     }
 
     if (!!dbInstanceIdentifiers && !!dbClusterIdentifiers) {
-      throw new Error('Cannot specify both dbInstanceIdentifiers and dbClusterIdentifiers');
+      throw new ValidationError('Cannot specify both dbInstanceIdentifiers and dbClusterIdentifiers', this);
     }
 
     const proxyTargetGroup = new CfnDBProxyTargetGroup(this, 'ProxyTargetGroup', {
@@ -490,12 +530,36 @@ export class DatabaseProxy extends DatabaseProxyBase
       connectionPoolConfigurationInfo: toConnectionPoolConfigurationInfo(props),
     });
 
-    bindResult.dbClusters?.forEach((c) => proxyTargetGroup.node.addDependency(c));
+    // When a `DatabaseProxy` is created by `DatabaseCluster.addProxy`,
+    // the `DatabaseProxy` and `DBProxyTarget` are created as a child of the `DatabaseCluster`,
+    // so if multiple `DatabaseProxy` are created by `DatabaseCluster.addProxy`,
+    // using `node.addDependency` will cause circular dependencies.
+    // To avoid this, use `CfnResource.addDependency` to add dependencies on `DatabaseCluster` and `DBInstance`.
+    bindResult.dbClusters?.forEach((cluster) => {
+      cluster.node.children.forEach((child) => {
+        // Legacy case using the `instanceProps` property of `DatabaseCluster`.
+        if (child instanceof CfnDBInstance) {
+          proxyTargetGroup.addDependency(child);
+        }
+        // The case of `AuroraClusterInstance` constructs passed via the `writer` and `readers` properties of `DatabaseCluster`.
+        // We can't use the `AuroraClusterInstance` class to check the type with `instanceof` because the class is not exported.
+        // The `defaultChild` that the construct has should be a `CfnDBInstance`, so check it.
+        const resource = child.node.defaultChild;
+        if (resource instanceof CfnDBInstance) {
+          proxyTargetGroup.addDependency(resource);
+        }
+      });
+      const clusterResource = cluster.node.defaultChild as cdk.CfnResource;
+      if (clusterResource && cdk.CfnResource.isCfnResource(clusterResource)) {
+        proxyTargetGroup.addDependency(clusterResource);
+      }
+    });
   }
 
   /**
    * Renders the secret attachment target specifications.
    */
+  @MethodMetadata()
   public asSecretAttachmentTarget(): secretsmanager.SecretAttachmentTargetProps {
     return {
       targetId: this.dbProxyName,
@@ -503,16 +567,33 @@ export class DatabaseProxy extends DatabaseProxyBase
     };
   }
 
+  @MethodMetadata()
   public grantConnect(grantee: iam.IGrantable, dbUser?: string): iam.Grant {
     if (!dbUser) {
       if (this.secrets.length > 1) {
-        throw new Error('When the Proxy contains multiple Secrets, you must pass a dbUser explicitly to grantConnect()');
+        throw new ValidationError('When the Proxy contains multiple Secrets, you must pass a dbUser explicitly to grantConnect()', this);
       }
       // 'username' is the field RDS uses here,
       // see https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/rds-proxy.html#rds-proxy-secrets-arns
       dbUser = this.secrets[0].secretValueFromJson('username').unsafeUnwrap();
     }
     return super.grantConnect(grantee, dbUser);
+  }
+
+  private validateClientPasswordAuthType(engineFamily: string, clientPasswordAuthType?: ClientPasswordAuthType) {
+    if (!clientPasswordAuthType || cdk.Token.isUnresolved(clientPasswordAuthType)) return;
+    if (clientPasswordAuthType === ClientPasswordAuthType.MYSQL_NATIVE_PASSWORD && engineFamily !== 'MYSQL') {
+      throw new ValidationError(`${ClientPasswordAuthType.MYSQL_NATIVE_PASSWORD} client password authentication type requires MYSQL engineFamily, got ${engineFamily}`, this);
+    }
+    if (clientPasswordAuthType === ClientPasswordAuthType.POSTGRES_SCRAM_SHA_256 && engineFamily !== 'POSTGRESQL') {
+      throw new ValidationError(`${ClientPasswordAuthType.POSTGRES_SCRAM_SHA_256} client password authentication type requires POSTGRESQL engineFamily, got ${engineFamily}`, this);
+    }
+    if (clientPasswordAuthType === ClientPasswordAuthType.POSTGRES_MD5 && engineFamily !== 'POSTGRESQL') {
+      throw new ValidationError(`${ClientPasswordAuthType.POSTGRES_MD5} client password authentication type requires POSTGRESQL engineFamily, got ${engineFamily}`, this);
+    }
+    if (clientPasswordAuthType === ClientPasswordAuthType.SQL_SERVER_AUTHENTICATION && engineFamily !== 'SQLSERVER') {
+      throw new ValidationError(`${ClientPasswordAuthType.SQL_SERVER_AUTHENTICATION} client password authentication type requires SQLSERVER engineFamily, got ${engineFamily}`, this);
+    }
   }
 }
 

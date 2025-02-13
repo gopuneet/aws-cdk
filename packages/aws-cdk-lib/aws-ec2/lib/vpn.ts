@@ -9,6 +9,7 @@ import {
 import { IVpc, SubnetSelection } from './vpc';
 import * as cloudwatch from '../../aws-cloudwatch';
 import { IResource, Resource, SecretValue, Token } from '../../core';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
 
 export interface IVpnConnection extends IResource {
   /**
@@ -41,7 +42,7 @@ export interface IVpnGateway extends IResource {
   /**
    * The virtual private gateway Id
    */
-  readonly gatewayId: string
+  readonly gatewayId: string;
 }
 
 export interface VpnTunnelOption {
@@ -130,7 +131,7 @@ export interface EnableVpnGatewayOptions extends VpnGatewayProps {
    * Provide an array of subnets where the route propagation should be added.
    * @default noPropagation
    */
-  readonly vpnRoutePropagation?: SubnetSelection[]
+  readonly vpnRoutePropagation?: SubnetSelection[];
 }
 
 export interface VpnConnectionProps extends VpnConnectionOptions {
@@ -153,7 +154,7 @@ export enum VpnConnectionType {
    * Dummy member
    * TODO: remove once https://github.com/aws/jsii/issues/231 is fixed
    */
-  DUMMY = 'dummy'
+  DUMMY = 'dummy',
 }
 
 /**
@@ -162,7 +163,6 @@ export enum VpnConnectionType {
  * @resource AWS::EC2::VPNGateway
  */
 export class VpnGateway extends Resource implements IVpnGateway {
-
   /**
    * The virtual private gateway Id
    */
@@ -170,6 +170,8 @@ export class VpnGateway extends Resource implements IVpnGateway {
 
   constructor(scope: Construct, id: string, props: VpnGatewayProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     // This is 'Default' instead of 'Resource', because using 'Default' will generate
     // a logical ID for a VpnGateway which is exactly the same as the logical ID that used
@@ -210,12 +212,10 @@ export interface VpnConnectionAttributes {
  * Base class for Vpn connections.
  */
 export abstract class VpnConnectionBase extends Resource implements IVpnConnection {
-
   public abstract readonly vpnId: string;
   public abstract readonly customerGatewayId: string;
   public abstract readonly customerGatewayIp: string;
   public abstract readonly customerGatewayAsn: number;
-
 }
 
 /**
@@ -224,23 +224,18 @@ export abstract class VpnConnectionBase extends Resource implements IVpnConnecti
  * @resource AWS::EC2::VPNConnection
  */
 export class VpnConnection extends VpnConnectionBase {
-
   /**
    * Import a VPN connection by supplying all attributes directly
    */
   public static fromVpnConnectionAttributes(scope: Construct, id: string, attrs: VpnConnectionAttributes): IVpnConnection {
-
     class Import extends VpnConnectionBase {
-
       public readonly vpnId: string = attrs.vpnId;
       public readonly customerGatewayId: string = attrs.customerGatewayId;
       public readonly customerGatewayIp: string = attrs.customerGatewayIp;
       public readonly customerGatewayAsn: number = attrs.customerGatewayAsn;
-
     }
 
     return new Import(scope, id);
-
   }
 
   /**
@@ -288,6 +283,8 @@ export class VpnConnection extends VpnConnectionBase {
 
   constructor(scope: Construct, id: string, props: VpnConnectionProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     if (!props.vpc.vpnGatewayId) {
       props.vpc.enableVpnGateway({
@@ -319,7 +316,9 @@ export class VpnConnection extends VpnConnectionBase {
         throw new Error('Cannot specify more than two `tunnelOptions`');
       }
 
-      if (props.tunnelOptions.length === 2 && props.tunnelOptions[0].tunnelInsideCidr === props.tunnelOptions[1].tunnelInsideCidr) {
+      if (props.tunnelOptions.length === 2 &&
+        props.tunnelOptions[0].tunnelInsideCidr === props.tunnelOptions[1].tunnelInsideCidr &&
+        props.tunnelOptions[0].tunnelInsideCidr !== undefined) {
         throw new Error(`Same ${props.tunnelOptions[0].tunnelInsideCidr} \`tunnelInsideCidr\` cannot be used for both tunnels.`);
       }
 

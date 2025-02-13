@@ -1,3 +1,5 @@
+import { UnscopedValidationError } from '../../core/lib/errors';
+
 /**
  * Conditions that can be applied to string attributes.
  */
@@ -35,6 +37,13 @@ export interface StringConditions {
    * @default - None
    */
   readonly matchPrefixes?: string[];
+
+  /**
+   * Matches values that end with the specified suffixes.
+   *
+   * @default - None
+   */
+  readonly matchSuffixes?: string[];
 }
 
 /**
@@ -124,10 +133,10 @@ export class SubscriptionFilter {
     const conditions = new Array<any>();
 
     if (stringConditions.whitelist && stringConditions.allowlist) {
-      throw new Error('`whitelist` is deprecated; please use `allowlist` instead');
+      throw new UnscopedValidationError('`whitelist` is deprecated; please use `allowlist` instead');
     }
     if (stringConditions.blacklist && stringConditions.denylist) {
-      throw new Error('`blacklist` is deprecated; please use `denylist` instead');
+      throw new UnscopedValidationError('`blacklist` is deprecated; please use `denylist` instead');
     }
     const allowlist = stringConditions.allowlist ?? stringConditions.whitelist;
     const denylist = stringConditions.denylist ?? stringConditions.blacklist;
@@ -144,6 +153,10 @@ export class SubscriptionFilter {
       conditions.push(...stringConditions.matchPrefixes.map(p => ({ prefix: p })));
     }
 
+    if (stringConditions.matchSuffixes) {
+      conditions.push(...stringConditions.matchSuffixes.map(s => ({ suffix: s })));
+    }
+
     return new SubscriptionFilter(conditions);
   }
 
@@ -154,7 +167,7 @@ export class SubscriptionFilter {
     const conditions = new Array<any>();
 
     if (numericConditions.whitelist && numericConditions.allowlist) {
-      throw new Error('`whitelist` is deprecated; please use `allowlist` instead');
+      throw new UnscopedValidationError('`whitelist` is deprecated; please use `allowlist` instead');
     }
     const allowlist = numericConditions.allowlist ?? numericConditions.whitelist;
 

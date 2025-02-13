@@ -1,6 +1,9 @@
 import { Construct } from 'constructs';
+import { IdentitySource } from './identity-source';
 import * as cognito from '../../../aws-cognito';
 import { Duration, FeatureFlags, Lazy, Names, Stack } from '../../../core';
+import { ValidationError } from '../../../core/lib/errors';
+import { addConstructMetadata } from '../../../core/lib/metadata-resource';
 import { APIGATEWAY_AUTHORIZER_CHANGE_DEPLOYMENT_LOGICAL_ID } from '../../../cx-api';
 import { CfnAuthorizer, CfnAuthorizerProps } from '../apigateway.generated';
 import { Authorizer, IAuthorizer } from '../authorizer';
@@ -33,8 +36,9 @@ export interface CognitoUserPoolsAuthorizerProps {
 
   /**
    * The request header mapping expression for the bearer token. This is typically passed as part of the header, in which case
-   * this should be `method.request.header.Authorizer` where Authorizer is the header containing the bearer token.
-   * @see https://docs.aws.amazon.com/apigateway/api-reference/link-relation/authorizer-create/#identitySource
+   * this should be `method.request.header.Authorizer` where `Authorizer` is the header containing the bearer token.
+   *
+   * @see https://docs.aws.amazon.com/apigateway/latest/api/API_CreateAuthorizer.html#apigw-CreateAuthorizer-request-identitySource
    * @default `IdentitySource.header('Authorization')`
    */
   readonly identitySource?: string;
@@ -69,6 +73,8 @@ export class CognitoUserPoolsAuthorizer extends Authorizer implements IAuthorize
 
   constructor(scope: Construct, id: string, props: CognitoUserPoolsAuthorizerProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const restApiId = this.lazyRestApiId();
 
@@ -78,7 +84,7 @@ export class CognitoUserPoolsAuthorizer extends Authorizer implements IAuthorize
       type: 'COGNITO_USER_POOLS',
       providerArns: props.cognitoUserPools.map(userPool => userPool.userPoolArn),
       authorizerResultTtlInSeconds: props.resultsCacheTtl?.toSeconds(),
-      identitySource: props.identitySource || 'method.request.header.Authorization',
+      identitySource: props.identitySource || IdentitySource.header('Authorization'),
     };
 
     this.authorizerProps = authorizerProps;
@@ -100,7 +106,7 @@ export class CognitoUserPoolsAuthorizer extends Authorizer implements IAuthorize
    */
   public _attachToApi(restApi: IRestApi): void {
     if (this.restApiId && this.restApiId !== restApi.restApiId) {
-      throw new Error('Cannot attach authorizer to two different rest APIs');
+      throw new ValidationError('Cannot attach authorizer to two different rest APIs', restApi);
     }
 
     this.restApiId = restApi.restApiId;
@@ -124,7 +130,7 @@ export class CognitoUserPoolsAuthorizer extends Authorizer implements IAuthorize
     return Lazy.string({
       produce: () => {
         if (!this.restApiId) {
-          throw new Error(`Authorizer (${this.node.path}) must be attached to a RestApi`);
+          throw new ValidationError(`Authorizer (${this.node.path}) must be attached to a RestApi`, this);
         }
         return this.restApiId;
       },

@@ -3,6 +3,7 @@ import * as iam from '../../aws-iam';
 import * as kms from '../../aws-kms';
 import { CfnParameter, Duration, Stack, App, Token } from '../../core';
 import * as sqs from '../lib';
+import { validateRedriveAllowPolicy } from '../lib/validate-queue-props';
 
 /* eslint-disable quote-props */
 
@@ -62,6 +63,17 @@ test('with a dead letter queue', () => {
   expect(queue.deadLetterQueue).toEqual(dlqProps);
 });
 
+test('multiple prop validation errors are presented to the user (out-of-range retentionPeriod and deliveryDelay)', () => {
+  // GIVEN
+  const stack = new Stack();
+
+  // THEN
+  expect(() => new sqs.Queue(stack, 'MyQueue', {
+    retentionPeriod: Duration.seconds(30),
+    deliveryDelay: Duration.minutes(16),
+  })).toThrow('Queue initialization failed due to the following validation error(s):\n- delivery delay must be between 0 and 900 seconds, but 960 was provided\n- message retention period must be between 60 and 1,209,600 seconds, but 30 was provided');
+});
+
 test('message retention period must be between 1 minute to 14 days', () => {
   // GIVEN
   const stack = new Stack();
@@ -69,11 +81,11 @@ test('message retention period must be between 1 minute to 14 days', () => {
   // THEN
   expect(() => new sqs.Queue(stack, 'MyQueue', {
     retentionPeriod: Duration.seconds(30),
-  })).toThrow(/message retention period must be 60 seconds or more/);
+  })).toThrow('Queue initialization failed due to the following validation error(s):\n- message retention period must be between 60 and 1,209,600 seconds, but 30 was provided');
 
   expect(() => new sqs.Queue(stack, 'AnotherQueue', {
     retentionPeriod: Duration.days(15),
-  })).toThrow(/message retention period must be 1209600 seconds or less/);
+  })).toThrow('Queue initialization failed due to the following validation error(s):\n- message retention period must be between 60 and 1,209,600 seconds, but 1296000 was provided');
 });
 
 test('message retention period can be provided as a parameter', () => {
@@ -155,6 +167,65 @@ test('addToPolicy will automatically create a policy for this queue', () => {
   });
 });
 
+describe('validateRedriveAllowPolicy', () => {
+  test('does not throw for valid policy', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    const redriveAllowPolicy = { redrivePermission: sqs.RedrivePermission.ALLOW_ALL };
+
+    // THEN
+    expect(() => validateRedriveAllowPolicy(stack, redriveAllowPolicy)).not.toThrow();
+  });
+
+  test('throws when sourceQueues is provided with ALLOW_ALL permission', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    const sourceQueue = new sqs.Queue(stack, 'SourceQueue');
+    const redriveAllowPolicy = {
+      redrivePermission: sqs.RedrivePermission.ALLOW_ALL,
+      sourceQueues: [sourceQueue],
+    };
+
+    // THEN
+    expect(() => validateRedriveAllowPolicy(stack, redriveAllowPolicy))
+      .toThrow("Queue initialization failed due to the following validation error(s):\n- sourceQueues cannot be configured when RedrivePermission is set to 'allowAll' or 'denyAll'");
+  });
+
+  test('throws when sourceQueues is not provided with BY_QUEUE permission', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    const redriveAllowPolicy = {
+      redrivePermission: sqs.RedrivePermission.BY_QUEUE,
+    };
+
+    // THEN
+    expect(() => validateRedriveAllowPolicy(stack, redriveAllowPolicy))
+      .toThrow("Queue initialization failed due to the following validation error(s):\n- At least one source queue must be specified when RedrivePermission is set to 'byQueue'");
+  });
+
+  test('throws when more than 10 sourceQueues are provided', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    const sourceQueues = Array(11).fill(null).map((_, i) => new sqs.Queue(stack, `SourceQueue${i}`));
+    const redriveAllowPolicy = {
+      redrivePermission: sqs.RedrivePermission.BY_QUEUE,
+      sourceQueues,
+    };
+
+    // THEN
+    expect(() => validateRedriveAllowPolicy(stack, redriveAllowPolicy))
+      .toThrow("Queue initialization failed due to the following validation error(s):\n- Up to 10 sourceQueues can be specified. Set RedrivePermission to 'allowAll' to specify more");
+  });
+});
+
 describe('export and import', () => {
   test('importing works correctly', () => {
     // GIVEN
@@ -180,6 +251,15 @@ describe('export and import', () => {
     const fifoQueue = sqs.Queue.fromQueueArn(stack, 'FifoQueue', 'arn:aws:sqs:us-east-1:123456789012:queue2.fifo');
     expect(stdQueue.fifo).toEqual(false);
     expect(fifoQueue.fifo).toEqual(true);
+  });
+
+  test('importing with keyArn and encryptionType is set correctly', () => {
+    const stack = new Stack();
+    const queue = sqs.Queue.fromQueueAttributes(stack, 'Queue', {
+      queueArn: 'arn:aws:sqs:us-east-1:123456789012:queue1',
+      keyArn: 'arn:aws:kms:us-east-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab',
+    });
+    expect(queue.encryptionType).toEqual(sqs.QueueEncryption.KMS);
   });
 
   test('import queueArn from token, fifo and standard queues can be defined', () => {
@@ -275,6 +355,38 @@ describe('export and import', () => {
     });
     expect(stack.resolve(imports.queueName)).toEqual('queue1');
   });
+
+  test('sets account for imported queue env by fromQueueAttributes', () => {
+    const stack = new Stack();
+    const imported = sqs.Queue.fromQueueAttributes(stack, 'Imported', {
+      queueArn: 'arn:aws:sqs:us-west-2:999999999999:queue',
+    });
+
+    expect(imported.env.account).toEqual('999999999999');
+  });
+
+  test('sets region for imported queue env by fromQueueAttributes', () => {
+    const stack = new Stack();
+    const imported = sqs.Queue.fromQueueAttributes(stack, 'Imported', {
+      queueArn: 'arn:aws:sqs:us-west-2:999999999999:queue',
+    });
+
+    expect(imported.env.region).toEqual('us-west-2');
+  });
+
+  test('sets account for imported queue env by fromQueueArn', () => {
+    const stack = new Stack();
+    const imported = sqs.Queue.fromQueueArn(stack, 'Imported', 'arn:aws:sqs:us-west-2:999999999999:queue');
+
+    expect(imported.env.account).toEqual('999999999999');
+  });
+
+  test('sets region for imported queue env by fromQueueArn', () => {
+    const stack = new Stack();
+    const imported = sqs.Queue.fromQueueArn(stack, 'Imported', 'arn:aws:sqs:us-west-2:123456789012:queue');
+
+    expect(imported.env.region).toEqual('us-west-2');
+  });
 });
 
 describe('grants', () => {
@@ -349,6 +461,7 @@ describe('queue encryption', () => {
     const queue = new sqs.Queue(stack, 'Queue', { encryptionMasterKey: key });
 
     expect(queue.encryptionMasterKey).toEqual(key);
+    expect(queue.encryptionType).toEqual(sqs.QueueEncryption.KMS);
     Template.fromStack(stack).hasResourceProperties('AWS::SQS::Queue', {
       'KmsMasterKeyId': { 'Fn::GetAtt': ['CustomKey1E6D0D07', 'Arn'] },
     });
@@ -357,7 +470,7 @@ describe('queue encryption', () => {
   test('a kms key will be allocated if encryption = kms but a master key is not specified', () => {
     const stack = new Stack();
 
-    new sqs.Queue(stack, 'Queue', { encryption: sqs.QueueEncryption.KMS });
+    const queue = new sqs.Queue(stack, 'Queue', { encryption: sqs.QueueEncryption.KMS });
 
     Template.fromStack(stack).hasResourceProperties('AWS::KMS::Key', Match.anyValue());
     Template.fromStack(stack).hasResourceProperties('AWS::SQS::Queue', {
@@ -368,12 +481,14 @@ describe('queue encryption', () => {
         ],
       },
     });
+    expect(queue.encryptionType).toEqual(sqs.QueueEncryption.KMS);
   });
 
   test('it is possible to use a managed kms key', () => {
     const stack = new Stack();
 
-    new sqs.Queue(stack, 'Queue', { encryption: sqs.QueueEncryption.KMS_MANAGED });
+    const queue = new sqs.Queue(stack, 'Queue', { encryption: sqs.QueueEncryption.KMS_MANAGED });
+
     Template.fromStack(stack).templateMatches({
       'Resources': {
         'Queue4A7E3555': {
@@ -386,6 +501,7 @@ describe('queue encryption', () => {
         },
       },
     });
+    expect(queue.encryptionType).toEqual(sqs.QueueEncryption.KMS_MANAGED);
   });
 
   test('grant also affects key on encrypted queue', () => {
@@ -433,7 +549,8 @@ describe('queue encryption', () => {
   test('it is possible to use sqs managed server side encryption', () => {
     const stack = new Stack();
 
-    new sqs.Queue(stack, 'Queue', { encryption: sqs.QueueEncryption.SQS_MANAGED });
+    const queue = new sqs.Queue(stack, 'Queue', { encryption: sqs.QueueEncryption.SQS_MANAGED });
+
     Template.fromStack(stack).templateMatches({
       'Resources': {
         'Queue4A7E3555': {
@@ -446,12 +563,13 @@ describe('queue encryption', () => {
         },
       },
     });
+    expect(queue.encryptionType).toEqual(sqs.QueueEncryption.SQS_MANAGED);
   });
 
   test('it is possible to disable encryption (unencrypted)', () => {
     const stack = new Stack();
 
-    new sqs.Queue(stack, 'Queue', { encryption: sqs.QueueEncryption.UNENCRYPTED });
+    const queue = new sqs.Queue(stack, 'Queue', { encryption: sqs.QueueEncryption.UNENCRYPTED });
     Template.fromStack(stack).templateMatches({
       'Resources': {
         'Queue4A7E3555': {
@@ -464,6 +582,7 @@ describe('queue encryption', () => {
         },
       },
     });
+    expect(queue.encryptionType).toEqual(sqs.QueueEncryption.UNENCRYPTED);
   });
 
   test('encryptionMasterKey is not supported if encryption type SQS_MANAGED is used', () => {
@@ -476,6 +595,19 @@ describe('queue encryption', () => {
       encryption: sqs.QueueEncryption.SQS_MANAGED,
       encryptionMasterKey: key,
     })).toThrow(/'encryptionMasterKey' is not supported if encryption type 'SQS_MANAGED' is used/);
+  });
+
+  test('encryptionType is always KMS, when an encryptionMasterKey is provided', () => {
+    // GIVEN
+    const stack = new Stack();
+    const key = new kms.Key(stack, 'CustomKey');
+    const queue = new sqs.Queue(stack, 'Queue', {
+      encryption: sqs.QueueEncryption.KMS_MANAGED,
+      encryptionMasterKey: key,
+    });
+
+    // THEN
+    expect(queue.encryptionType).toBe(sqs.QueueEncryption.KMS);
   });
 });
 
@@ -614,6 +746,28 @@ test('test a queue throws when deduplicationScope specified on non fifo queue', 
   }).toThrow();
 });
 
+test('fifo: false is dropped from properties', () => {
+  // GIVEN
+  const stack = new Stack();
+
+  // WHEN
+  new sqs.Queue(stack, 'Queue', {
+    fifo: false,
+  });
+
+  // THEN
+  Template.fromStack(stack).templateMatches({
+    'Resources': {
+      'Queue4A7E3555': {
+        'Type': 'AWS::SQS::Queue',
+        'Properties': Match.absent(),
+        'UpdateReplacePolicy': 'Delete',
+        'DeletionPolicy': 'Delete',
+      },
+    },
+  });
+});
+
 test('test metrics', () => {
   // GIVEN
   const stack = new Stack();
@@ -667,6 +821,155 @@ test('fails if queue policy has no IAM principals', () => {
 
   // THEN
   expect(() => app.synth()).toThrow(/A PolicyStatement used in a resource-based policy must specify at least one IAM principal/);
+});
+
+describe('redriveAllowPolicy', () => {
+  test('Default settings for the dead letter source queue permission', () => {
+    const stack = new Stack();
+    new sqs.Queue(stack, 'Queue', {
+      redriveAllowPolicy: {},
+    });
+
+    Template.fromStack(stack).templateMatches({
+      'Resources': {
+        'Queue4A7E3555': {
+          'Type': 'AWS::SQS::Queue',
+          'Properties': {
+            'RedriveAllowPolicy': {
+              'redrivePermission': 'allowAll',
+            },
+          },
+          'UpdateReplacePolicy': 'Delete',
+          'DeletionPolicy': 'Delete',
+        },
+      },
+    });
+  });
+
+  test.each([
+    [sqs.RedrivePermission.ALLOW_ALL, 'allowAll'],
+    [sqs.RedrivePermission.DENY_ALL, 'denyAll'],
+  ])('redrive permission can be set to %s', (permission, expected) => {
+    const stack = new Stack();
+    new sqs.Queue(stack, 'Queue', {
+      redriveAllowPolicy: {
+        redrivePermission: permission,
+      },
+    });
+
+    Template.fromStack(stack).templateMatches({
+      'Resources': {
+        'Queue4A7E3555': {
+          'Type': 'AWS::SQS::Queue',
+          'Properties': {
+            'RedriveAllowPolicy': {
+              'redrivePermission': expected,
+            },
+          },
+          'UpdateReplacePolicy': 'Delete',
+          'DeletionPolicy': 'Delete',
+        },
+      },
+    });
+  });
+
+  test('explicit specification of dead letter source queues', () => {
+    const stack = new Stack();
+    const sourceQueue1 = new sqs.Queue(stack, 'SourceQueue1');
+    const sourceQueue2 = new sqs.Queue(stack, 'SourceQueue2');
+    new sqs.Queue(stack, 'Queue', { redriveAllowPolicy: { sourceQueues: [sourceQueue1, sourceQueue2] } });
+
+    Template.fromStack(stack).templateMatches({
+      'Resources': {
+        'SourceQueue1F4BBA4BB': {
+          'Type': 'AWS::SQS::Queue',
+          'UpdateReplacePolicy': 'Delete',
+          'DeletionPolicy': 'Delete',
+        },
+        'SourceQueue22481CB5A': {
+          'Type': 'AWS::SQS::Queue',
+          'UpdateReplacePolicy': 'Delete',
+          'DeletionPolicy': 'Delete',
+        },
+        'Queue4A7E3555': {
+          'Type': 'AWS::SQS::Queue',
+          'Properties': {
+            'RedriveAllowPolicy': {
+              'redrivePermission': 'byQueue',
+              'sourceQueueArns': [
+                {
+                  'Fn::GetAtt': [
+                    'SourceQueue1F4BBA4BB',
+                    'Arn',
+                  ],
+                },
+                {
+                  'Fn::GetAtt': [
+                    'SourceQueue22481CB5A',
+                    'Arn',
+                  ],
+                },
+              ],
+            },
+          },
+          'UpdateReplacePolicy': 'Delete',
+          'DeletionPolicy': 'Delete',
+        },
+      },
+    });
+  });
+
+  test('throw if sourceQueues is not specified when redrivePermission is byQueue', () => {
+    const stack = new Stack();
+    expect(() => {
+      new sqs.Queue(stack, 'Queue', {
+        redriveAllowPolicy: {
+          redrivePermission: sqs.RedrivePermission.BY_QUEUE,
+        },
+      });
+    }).toThrow(/At least one source queue must be specified when RedrivePermission is set to 'byQueue'/);
+  });
+
+  test('throw if dead letter source queues are specified with allowAll permission', () => {
+    const stack = new Stack();
+    const sourceQueue1 = new sqs.Queue(stack, 'SourceQueue1');
+    expect(() => {
+      new sqs.Queue(stack, 'Queue', {
+        redriveAllowPolicy: {
+          sourceQueues: [sourceQueue1],
+          redrivePermission: sqs.RedrivePermission.ALLOW_ALL,
+        },
+      });
+    }).toThrow(/sourceQueues cannot be configured when RedrivePermission is set to 'allowAll' or 'denyAll'/);
+  });
+
+  test('throw if souceQueues length is greater than 10', () => {
+    const stack = new Stack();
+    const sourceQueues: sqs.IQueue[] = [];
+    for (let i = 0; i < 11; i++) {
+      sourceQueues.push(new sqs.Queue(stack, `SourceQueue${i}`));
+    }
+    expect(() => {
+      new sqs.Queue(stack, 'Queue', {
+        redriveAllowPolicy: {
+          sourceQueues,
+          redrivePermission: sqs.RedrivePermission.BY_QUEUE,
+        },
+      });
+    }).toThrow(/Up to 10 sourceQueues can be specified. Set RedrivePermission to 'allowAll' to specify more/);
+  });
+
+  test('throw if sourceQueues is blank array when redrivePermission is byQueue', () => {
+    const stack = new Stack();
+    expect(() => {
+      new sqs.Queue(stack, 'Queue', {
+        redriveAllowPolicy: {
+          sourceQueues: [],
+          redrivePermission: sqs.RedrivePermission.BY_QUEUE,
+        },
+      });
+    }).toThrow(/At least one source queue must be specified when RedrivePermission is set to 'byQueue'/);
+  });
 });
 
 function testGrant(action: (q: sqs.Queue, principal: iam.IPrincipal) => void, ...expectedActions: string[]) {

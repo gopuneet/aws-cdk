@@ -4,6 +4,7 @@ import * as iam from '../../aws-iam';
 import * as s3 from '../../aws-s3';
 import * as s3_assets from '../../aws-s3-assets';
 import { Duration } from '../../core';
+import { md5hash } from '../../core/lib/helpers-internal';
 
 /**
  * An object that represents reasons to restart an InitService
@@ -85,7 +86,6 @@ export class InitServiceRestartHandle {
  * Base class for all CloudFormation Init elements
  */
 export abstract class InitElement {
-
   /**
    * Returns the init element type for this element.
    */
@@ -100,7 +100,6 @@ export abstract class InitElement {
    * @internal
    */
   public abstract _bind(options: InitBindOptions): InitElementConfig;
-
 }
 
 /**
@@ -257,7 +256,6 @@ export class InitCommand extends InitElement {
       },
     };
   }
-
 }
 
 /**
@@ -322,7 +320,6 @@ export interface InitFileAssetOptions extends InitFileOptions, s3_assets.AssetOp
  * Create files on the EC2 instance.
  */
 export abstract class InitFile extends InitElement {
-
   /**
    * Use a literal string as the file content
    */
@@ -424,7 +421,9 @@ export abstract class InitFile extends InitElement {
   public static fromAsset(targetFileName: string, path: string, options: InitFileAssetOptions = {}): InitFile {
     return new class extends InitFile {
       protected _doBind(bindOptions: InitBindOptions) {
-        const asset = new s3_assets.Asset(bindOptions.scope, `${targetFileName}Asset`, {
+        // md5 hash uses bindOptions.scope.node.children to get a unique value for each InitFile
+        // using bindOptions.scope.node.id would cause naming collisions if multiple InitFiles were created in the same stack, as the id would be the same stack id
+        const asset = new s3_assets.Asset(bindOptions.scope, `${md5hash(bindOptions.scope.node.children.toString())}${targetFileName}Asset`, {
           path,
           ...options,
         });
@@ -514,7 +513,6 @@ export abstract class InitFile extends InitElement {
  * Not supported for Windows systems.
  */
 export class InitGroup extends InitElement {
-
   /**
    * Create a group from its name, and optionally, group id
    */
@@ -540,7 +538,6 @@ export class InitGroup extends InitElement {
       },
     };
   }
-
 }
 
 /**
@@ -832,6 +829,10 @@ export class InitService extends InitElement {
       throw new Error(`SystemD executables must use an absolute path, got '${options.command}'`);
     }
 
+    if (options.environmentFiles?.some(file => !file.startsWith('/'))) {
+      throw new Error('SystemD environment files must use absolute paths');
+    }
+
     const lines = [
       '[Unit]',
       ...(options.description ? [`Description=${options.description}`] : []),
@@ -842,6 +843,17 @@ export class InitService extends InitElement {
       ...(options.user ? [`User=${options.user}`] : []),
       ...(options.group ? [`Group=${options.user}`] : []),
       ...(options.keepRunning ?? true ? ['Restart=always'] : []),
+      ...(
+        options.environmentFiles
+          ? options.environmentFiles.map(file => `EnvironmentFile=${file}`)
+          : []
+      ),
+      ...(
+        options.environmentVariables
+          ? Object.entries(options.environmentVariables)
+            .map(([key, value]) => `Environment="${key}=${value}"`)
+          : []
+      ),
       '[Install]',
       'WantedBy=multi-user.target',
     ];
@@ -872,7 +884,6 @@ export class InitService extends InitElement {
       },
     };
   }
-
 }
 
 /**
@@ -941,7 +952,9 @@ export abstract class InitSource extends InitElement {
   public static fromAsset(targetDirectory: string, path: string, options: InitSourceAssetOptions = {}): InitSource {
     return new class extends InitSource {
       protected _doBind(bindOptions: InitBindOptions) {
-        const asset = new s3_assets.Asset(bindOptions.scope, `${targetDirectory}Asset`, {
+        // md5 hash uses bindOptions.scope.node.children to get a unique value for each InitFile
+        // using bindOptions.scope.node.id would cause naming collisions if multiple InitFiles were created in the same stack, as the id would be the same stack id
+        const asset = new s3_assets.Asset(bindOptions.scope, `${md5hash(bindOptions.scope.node.children.toString())}${targetDirectory}Asset`, {
           path,
           ...bindOptions,
         });
@@ -1103,4 +1116,19 @@ export interface SystemdConfigFileOptions {
    * @default true
    */
   readonly afterNetwork?: boolean;
+
+  /**
+   * Environment variables to load when the process is running.
+   *
+   * @default - No environment variables set
+   */
+  readonly environmentVariables?: Record<string, string>;
+
+  /**
+   * Loads environment variables from files when the process is running.
+   * Must use absolute paths.
+   *
+   * @default - No environment files
+   */
+  readonly environmentFiles?: string[];
 }

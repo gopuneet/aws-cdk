@@ -69,7 +69,7 @@ new CfnOutput(this, 'ZookeeperConnectionTls', { value: cluster.zookeeperConnecti
 To import an existing MSK cluster into your CDK app use the `.fromClusterArn()` method.
 
 ```ts
-const cluster = msk.Cluster.fromClusterArn(this, 'Cluster', 
+const cluster = msk.Cluster.fromClusterArn(this, 'Cluster',
   'arn:aws:kafka:us-west-2:1234567890:cluster/a-cluster/11111111-1111-1111-1111-111111111111-1',
 );
 ```
@@ -124,7 +124,7 @@ const cluster = new msk.Cluster(this, 'cluster', {
 });
 ```
 
-### SASL/IAM
+### IAM
 
 Enable client authentication with [IAM](https://docs.aws.amazon.com/msk/latest/developerguide/iam-access-control.html):
 
@@ -146,7 +146,7 @@ const cluster = new msk.Cluster(this, 'cluster', {
 
 ### SASL/IAM + TLS
 
-Enable client authentication with [IAM](https://docs.aws.amazon.com/msk/latest/developerguide/iam-access-control.html) 
+Enable client authentication with [IAM](https://docs.aws.amazon.com/msk/latest/developerguide/iam-access-control.html)
 as well as enable client authentication with TLS by setting the `certificateAuthorityArns` property to reference your ACM Private CA. [More info on Private CAs.](https://docs.aws.amazon.com/msk/latest/developerguide/msk-authentication.html)
 
 ```ts
@@ -210,3 +210,45 @@ in the `cdk.json` file.
 }
 ```
 
+## Storage Mode
+
+You can configure an MSK cluster storage mode using the `storageMode` property.
+
+Tiered storage is a low-cost storage tier for Amazon MSK that scales to virtually unlimited storage,
+making it cost-effective to build streaming data applications.
+
+> Visit [Tiered storage](https://docs.aws.amazon.com/msk/latest/developerguide/msk-tiered-storage.html)
+to see the list of compatible Kafka versions and for more details.
+
+```ts
+declare const vpc: ec2.Vpc;
+declare const bucket: s3.IBucket;
+
+const cluster = new msk.Cluster(this, 'cluster', {
+  clusterName: 'myCluster',
+  kafkaVersion: msk.KafkaVersion.V3_6_0,
+  vpc,
+  storageMode: msk.StorageMode.TIERED,
+});
+```
+
+## MSK Serverless
+
+You can also use MSK Serverless by using `ServerlessCluster` class.
+
+MSK Serverless is a cluster type for Amazon MSK that makes it possible for you to run Apache Kafka without having to manage and scale cluster capacity.
+
+MSK Serverless requires IAM access control for all clusters.
+
+For more infomation, see [Use MSK Serverless clusters](https://docs.aws.amazon.com/msk/latest/developerguide/serverless-getting-started.html).
+
+```ts
+declare const vpc: ec2.Vpc;
+
+const serverlessCluster = new msk.ServerlessCluster(this, 'ServerlessCluster', {
+  clusterName: 'MyServerlessCluster',
+  vpcConfigs: [
+    { vpc },
+  ],
+});
+```

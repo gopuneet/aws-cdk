@@ -1,12 +1,10 @@
-import * as path from 'path';
 import { Construct, IConstruct } from 'constructs';
 import { ICluster, Cluster } from './cluster';
 import * as iam from '../../aws-iam';
-import * as lambda from '../../aws-lambda';
 import { Duration, Stack, NestedStack, Names, CfnCondition, Fn, Aws } from '../../core';
+import { KubectlFunction } from '../../custom-resource-handlers/dist/aws-eks/kubectl-provider.generated';
 import * as cr from '../../custom-resources';
 import { AwsCliLayer } from '../../lambda-layer-awscli';
-import { KubectlLayer } from '../../lambda-layer-kubectl';
 
 /**
  * Properties for a KubectlProvider
@@ -62,7 +60,6 @@ export interface IKubectlProvider extends IConstruct {
  * Implementation of Kubectl Lambda
  */
 export class KubectlProvider extends NestedStack implements IKubectlProvider {
-
   /**
    * Take existing provider or create new based on cluster
    *
@@ -133,25 +130,28 @@ export class KubectlProvider extends NestedStack implements IKubectlProvider {
 
     const memorySize = cluster.kubectlMemory ? cluster.kubectlMemory.toMebibytes() : 1024;
 
-    const handler = new lambda.Function(this, 'Handler', {
-      code: lambda.Code.fromAsset(path.join(__dirname, 'kubectl-handler')),
-      runtime: lambda.Runtime.PYTHON_3_7,
-      handler: 'index.handler',
+    const handler = new KubectlFunction(this, 'Handler', {
       timeout: Duration.minutes(15),
       description: 'onEvent handler for EKS kubectl resource provider',
       memorySize,
-      environment: cluster.kubectlEnvironment,
+      environment: {
+        // required and recommended for boto3
+        AWS_STS_REGIONAL_ENDPOINTS: 'regional',
+        ...cluster.kubectlEnvironment,
+      },
       role: cluster.kubectlLambdaRole ? cluster.kubectlLambdaRole : undefined,
 
       // defined only when using private access
       vpc: cluster.kubectlPrivateSubnets ? cluster.vpc : undefined,
-      securityGroups: cluster.kubectlSecurityGroup ? [cluster.kubectlSecurityGroup] : undefined,
+      securityGroups: cluster.kubectlPrivateSubnets && cluster.kubectlSecurityGroup ? [cluster.kubectlSecurityGroup] : undefined,
       vpcSubnets: cluster.kubectlPrivateSubnets ? { subnets: cluster.kubectlPrivateSubnets } : undefined,
     });
 
     // allow user to customize the layers with the tools we need
     handler.addLayers(props.cluster.awscliLayer ?? new AwsCliLayer(this, 'AwsCliLayer'));
-    handler.addLayers(props.cluster.kubectlLayer ?? new KubectlLayer(this, 'KubectlLayer'));
+    if (props.cluster.kubectlLayer) {
+      handler.addLayers(props.cluster.kubectlLayer);
+    }
 
     this.handlerRole = handler.role!;
 
@@ -194,17 +194,15 @@ export class KubectlProvider extends NestedStack implements IKubectlProvider {
       onEventHandler: handler,
       vpc: cluster.kubectlPrivateSubnets ? cluster.vpc : undefined,
       vpcSubnets: cluster.kubectlPrivateSubnets ? { subnets: cluster.kubectlPrivateSubnets } : undefined,
-      securityGroups: cluster.kubectlSecurityGroup ? [cluster.kubectlSecurityGroup] : undefined,
+      securityGroups: cluster.kubectlPrivateSubnets && cluster.kubectlSecurityGroup ? [cluster.kubectlSecurityGroup] : undefined,
     });
 
     this.serviceToken = provider.serviceToken;
     this.roleArn = cluster.kubectlRole.roleArn;
   }
-
 }
 
 class ImportedKubectlProvider extends Construct implements IKubectlProvider {
-
   /**
    * The custom resource provider's service token.
    */

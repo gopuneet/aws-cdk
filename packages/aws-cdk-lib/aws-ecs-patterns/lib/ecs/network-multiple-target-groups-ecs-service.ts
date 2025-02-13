@@ -72,7 +72,7 @@ export interface NetworkMultipleTargetGroupsEc2ServiceProps extends NetworkMulti
    * [Amazon ECS Task Placement Strategies](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-placement-strategies.html).
    *
    * @default - No strategies.
-  */
+   */
   readonly placementStrategies?: PlacementStrategy[];
 }
 
@@ -80,7 +80,6 @@ export interface NetworkMultipleTargetGroupsEc2ServiceProps extends NetworkMulti
  * An EC2 service running on an ECS cluster fronted by a network load balancer.
  */
 export class NetworkMultipleTargetGroupsEc2Service extends NetworkMultipleTargetGroupsServiceBase {
-
   /**
    * The EC2 service in this construct.
    */
@@ -148,9 +147,15 @@ export class NetworkMultipleTargetGroupsEc2Service extends NetworkMultipleTarget
       this.addPortMappingForTargets(this.taskDefinition.defaultContainer, props.targetGroups);
       this.targetGroup = this.registerECSTargets(this.service, this.taskDefinition.defaultContainer, props.targetGroups);
     } else {
+      const containerPort = this.taskDefinition.defaultContainer.portMappings[0].containerPort;
+
+      if (!containerPort) {
+        throw new Error('The first port mapping added to the default container must expose a single port');
+      }
+
       this.targetGroup = this.listener.addTargets('ECS', {
         targets: [this.service],
-        port: this.taskDefinition.defaultContainer.portMappings[0].containerPort,
+        port: containerPort,
       });
     }
   }

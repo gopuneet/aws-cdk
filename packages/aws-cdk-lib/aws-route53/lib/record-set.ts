@@ -1,34 +1,19 @@
-import * as path from 'path';
 import { Construct } from 'constructs';
-import { IAliasRecordTarget } from './alias-record-target';
+import { AliasRecordTargetConfig, IAliasRecordTarget } from './alias-record-target';
+import { GeoLocation } from './geo-location';
+import { IHealthCheck } from './health-check';
 import { IHostedZone } from './hosted-zone-ref';
 import { CfnRecordSet } from './route53.generated';
 import { determineFullyQualifiedDomainName } from './util';
 import * as iam from '../../aws-iam';
-import { builtInCustomResourceProviderNodeRuntime, CustomResource, CustomResourceProvider, Duration, IResource, RemovalPolicy, Resource, Token } from '../../core';
+import { CustomResource, Duration, IResource, Names, RemovalPolicy, Resource, Token } from '../../core';
+import { ValidationError } from '../../core/lib/errors';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
+import { CrossAccountZoneDelegationProvider } from '../../custom-resource-handlers/dist/aws-route53/cross-account-zone-delegation-provider.generated';
+import { DeleteExistingRecordSetProvider } from '../../custom-resource-handlers/dist/aws-route53/delete-existing-record-set-provider.generated';
 
 const CROSS_ACCOUNT_ZONE_DELEGATION_RESOURCE_TYPE = 'Custom::CrossAccountZoneDelegation';
 const DELETE_EXISTING_RECORD_SET_RESOURCE_TYPE = 'Custom::DeleteExistingRecordSet';
-
-/**
- * Context key to control whether to use the regional STS endpoint, instead of the global one
- *
- * There is only exactly one use case where you want to turn this on. If:
- *
- * - you are building an AWS service; AND
- * - would like to your own Global Service Principal in the trust policy of the delegation role; AND
- * - the target account is opted in in the same region as well
- *
- * Then you can turn this on. For all other use cases, the global endpoint is preferable:
- *
- * - if you are a regular customer, your trust policy would be in terms of account ids or
- *   organization ids, or ARNs, not Service Principals, so you don't care about this behavior.
- * - if the target account is not opted in as well, the AssumeRole call would fail
- *
- * Because this configuration option is so rare, turn it into a context setting instead
- * of a publicly available prop.
- */
-const USE_REGIONAL_STS_ENDPOINT_CONTEXT_KEY = '@aws-cdk/aws-route53:useRegionalStsEndpoint';
 
 /**
  * A record set
@@ -82,6 +67,15 @@ export enum RecordType {
    * @see https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/ResourceRecordTypes.html#DSFormat
    */
   DS = 'DS',
+
+  /**
+   * An HTTPS resource record is a form of the Service Binding (SVCB) DNS record that provides extended configuration information,
+   * enabling a client to easily and securely connect to a service with an HTTP protocol.
+   * The configuration information is provided in parameters that allow the connection in one DNS query, rather than necessitating multiple DNS queries.
+   *
+   * @see https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/ResourceRecordTypes.html#HTTPSFormat
+   */
+  HTTPS = 'HTTPS',
 
   /**
    * An MX record specifies the names of your mail servers and, if you have two or more mail servers,
@@ -139,11 +133,35 @@ export enum RecordType {
   SRV = 'SRV',
 
   /**
+   * A Secure Shell fingerprint record (SSHFP) identifies SSH keys associated with the domain name.
+   * SSHFP records must be secured with DNSSEC for a chain of trust to be established.
+   *
+   * @see https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/ResourceRecordTypes.html#SSHFPFormat
+   */
+  SSHFP = 'SSHFP',
+
+  /**
+   * You use an SVCB record to deliver configuration information for accessing service endpoints.
+   * The SVCB is a generic DNS record and can be used to negotiate parameters for a variety of application protocols.
+   *
+   * @see https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/ResourceRecordTypes.html#SVCBFormat
+   */
+  SVCB = 'SVCB',
+
+  /**
+   * You use a TLSA record to use DNS-Based Authentication of Named Entities (DANE).
+   * A TLSA record associates a certificate/public key with a Transport Layer Security (TLS) endpoint, and clients can validate the certificate/public key using a TLSA record signed with DNSSEC.
+   *
+   * @see https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/ResourceRecordTypes.html#TLSAFormat
+   */
+  TLSA = 'TLSA',
+
+  /**
    * A TXT record contains one or more strings that are enclosed in double quotation marks (").
    *
    * @see https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/ResourceRecordTypes.html#TXTFormat
    */
-  TXT = 'TXT'
+  TXT = 'TXT',
 }
 
 /**
@@ -154,6 +172,11 @@ export interface RecordSetOptions {
    * The hosted zone in which to define the new record.
    */
   readonly zone: IHostedZone;
+
+  /**
+   * The geographical origin for this record to return DNS records based on the user's location.
+   */
+  readonly geoLocation?: GeoLocation;
 
   /**
    * The subdomain name for this record. This should be relative to the zone root name.
@@ -197,6 +220,62 @@ export interface RecordSetOptions {
    * @default false
    */
   readonly deleteExisting?: boolean;
+
+  /**
+   * Among resource record sets that have the same combination of DNS name and type,
+   * a value that determines the proportion of DNS queries that Amazon Route 53 responds to using the current resource record set.
+   *
+   * Route 53 calculates the sum of the weights for the resource record sets that have the same combination of DNS name and type.
+   * Route 53 then responds to queries based on the ratio of a resource's weight to the total.
+   *
+   * This value can be a number between 0 and 255.
+   *
+   * @see https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy-weighted.html
+   *
+   * @default - Do not set weighted routing
+   */
+  readonly weight?: number;
+
+  /**
+   * The Amazon EC2 Region where you created the resource that this resource record set refers to.
+   * The resource typically is an AWS resource, such as an EC2 instance or an ELB load balancer,
+   * and is referred to by an IP address or a DNS domain name, depending on the record type.
+   *
+   * When Amazon Route 53 receives a DNS query for a domain name and type for which you have created latency resource record sets,
+   * Route 53 selects the latency resource record set that has the lowest latency between the end user and the associated Amazon EC2 Region.
+   * Route 53 then returns the value that is associated with the selected resource record set.
+   *
+   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-route53-recordset.html#cfn-route53-recordset-region
+   *
+   * @default - Do not set latency based routing
+   */
+  readonly region?: string;
+
+  /**
+   * Whether to return multiple values, such as IP addresses for your web servers, in response to DNS queries.
+   *
+   * @default false
+   */
+  readonly multiValueAnswer?: boolean;
+
+  /**
+   * A string used to distinguish between different records with the same combination of DNS name and type.
+   * It can only be set when either weight or geoLocation is defined.
+   *
+   * This parameter must be between 1 and 128 characters in length.
+   *
+   * @default - Auto generated string
+   */
+  readonly setIdentifier?: string;
+
+  /**
+   * The health check to associate with the record set.
+   *
+   * Route53 will return this record set in response to DNS queries only if the health check is passing.
+   *
+   * @default - No health check configured
+   */
+  readonly healthCheck?: IHealthCheck;
 }
 
 /**
@@ -254,9 +333,43 @@ export interface RecordSetProps extends RecordSetOptions {
  */
 export class RecordSet extends Resource implements IRecordSet {
   public readonly domainName: string;
+  private readonly geoLocation?: GeoLocation;
+  private readonly weight?: number;
+  private readonly region?: string;
+  private readonly multiValueAnswer?: boolean;
 
   constructor(scope: Construct, id: string, props: RecordSetProps) {
     super(scope, id);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
+
+    if (props.weight && !Token.isUnresolved(props.weight) && (props.weight < 0 || props.weight > 255)) {
+      throw new ValidationError(`weight must be between 0 and 255 inclusive, got: ${props.weight}`, this);
+    }
+    if (props.setIdentifier && (props.setIdentifier.length < 1 || props.setIdentifier.length > 128)) {
+      throw new ValidationError(`setIdentifier must be between 1 and 128 characters long, got: ${props.setIdentifier.length}`, this);
+    }
+    if (props.setIdentifier && props.weight === undefined && !props.geoLocation && !props.region && !props.multiValueAnswer) {
+      throw new ValidationError('setIdentifier can only be specified for non-simple routing policies', this);
+    }
+    if (props.multiValueAnswer && props.target.aliasTarget) {
+      throw new ValidationError('multiValueAnswer cannot be specified for alias record', this);
+    }
+
+    const nonSimpleRoutingPolicies = [
+      props.geoLocation,
+      props.region,
+      props.weight,
+      props.multiValueAnswer,
+    ].filter((variable) => variable !== undefined).length;
+    if (nonSimpleRoutingPolicies > 1) {
+      throw new ValidationError('Only one of region, weight, multiValueAnswer or geoLocation can be defined', this);
+    }
+
+    this.geoLocation = props.geoLocation;
+    this.weight = props.weight;
+    this.region = props.region;
+    this.multiValueAnswer = props.multiValueAnswer;
 
     const ttl = props.target.aliasTarget ? undefined : ((props.ttl && props.ttl.toSeconds()) ?? 1800).toString();
 
@@ -270,22 +383,29 @@ export class RecordSet extends Resource implements IRecordSet {
       aliasTarget: props.target.aliasTarget && props.target.aliasTarget.bind(this, props.zone),
       ttl,
       comment: props.comment,
+      geoLocation: props.geoLocation ? {
+        continentCode: props.geoLocation.continentCode,
+        countryCode: props.geoLocation.countryCode,
+        subdivisionCode: props.geoLocation.subdivisionCode,
+      } : undefined,
+      multiValueAnswer: props.multiValueAnswer,
+      setIdentifier: props.setIdentifier ?? this.configureSetIdentifier(),
+      weight: props.weight,
+      region: props.region,
+      healthCheckId: props.healthCheck?.healthCheckId,
     });
 
     this.domainName = recordSet.ref;
 
     if (props.deleteExisting) {
       // Delete existing record before creating the new one
-      const provider = CustomResourceProvider.getOrCreateProvider(this, DELETE_EXISTING_RECORD_SET_RESOURCE_TYPE, {
-        codeDirectory: path.join(__dirname, 'delete-existing-record-set-handler'),
-        runtime: builtInCustomResourceProviderNodeRuntime(this),
+      const provider = DeleteExistingRecordSetProvider.getOrCreateProvider(this, DELETE_EXISTING_RECORD_SET_RESOURCE_TYPE, {
         policyStatements: [{ // IAM permissions for all providers
           Effect: 'Allow',
           Action: 'route53:GetChange',
           Resource: '*',
         }],
       });
-
       // Add to the singleton policy for this specific provider
       provider.addToRolePolicy({
         Effect: 'Allow',
@@ -317,6 +437,50 @@ export class RecordSet extends Resource implements IRecordSet {
       recordSet.node.addDependency(customResource);
     }
   }
+
+  private configureSetIdentifier(): string | undefined {
+    if (this.geoLocation) {
+      let identifier = 'GEO';
+      if (this.geoLocation.continentCode) {
+        identifier = identifier.concat('_CONTINENT_', this.geoLocation.continentCode);
+      }
+      if (this.geoLocation.countryCode) {
+        identifier = identifier.concat('_COUNTRY_', this.geoLocation.countryCode);
+      }
+      if (this.geoLocation.subdivisionCode) {
+        identifier = identifier.concat('_SUBDIVISION_', this.geoLocation.subdivisionCode);
+      }
+      return identifier;
+    }
+
+    if (this.weight !== undefined) {
+      if (Token.isUnresolved(this.weight)) {
+        const replacement = 'XXX'; // XXX simply because 255 is the highest value for a record weight
+        const idPrefix = `WEIGHT_${replacement}_ID_`;
+        const idTemplate = this.createIdentifier(idPrefix);
+        return idTemplate.replace(replacement, Token.asString(this.weight));
+      } else {
+        const idPrefix = `WEIGHT_${this.weight}_ID_`;
+        return this.createIdentifier(idPrefix);
+      }
+    }
+
+    if (this.region) {
+      const idPrefix= `REGION_${this.region}_ID_`;
+      return this.createIdentifier(idPrefix);
+    }
+
+    if (this.multiValueAnswer) {
+      const idPrefix = 'MVA_ID_';
+      return this.createIdentifier(idPrefix);
+    }
+
+    return undefined;
+  }
+
+  private createIdentifier(prefix: string): string {
+    return `${prefix}${Names.uniqueResourceName(this, { maxLength: 64 - prefix.length })}`;
+  }
 }
 
 /**
@@ -338,17 +502,64 @@ export interface ARecordProps extends RecordSetOptions {
 }
 
 /**
+ * Construction properties to import existing ARecord as target.
+ */
+export interface ARecordAttrs extends RecordSetOptions{
+  /**
+   * Existing A record DNS name to set RecordTarget
+   */
+  readonly targetDNS: string;
+}
+
+/**
  * A DNS A record
  *
  * @resource AWS::Route53::RecordSet
  */
 export class ARecord extends RecordSet {
+  /**
+   * Creates new A record of type alias with target set to an existing A Record DNS.
+   * Use when the target A record is created outside of CDK
+   * For records created as part of CDK use @aws-cdk-lib/aws-route53-targets/route53-record.ts
+   * @param scope the parent Construct for this Construct
+   * @param id Logical Id of the resource
+   * @param attrs the ARecordAttributes (Target Arecord DNS name and HostedZone)
+   * @returns AWS::Route53::RecordSet of type A with target alias set to existing A record
+   */
+  public static fromARecordAttributes(scope: Construct, id: string, attrs: ARecordAttrs): ARecord {
+    const aliasTarget = RecordTarget.fromAlias(new ARecordAsAliasTarget(attrs));
+    return new ARecord(scope, id, {
+      ...attrs,
+      target: aliasTarget,
+    });
+  }
+
   constructor(scope: Construct, id: string, props: ARecordProps) {
     super(scope, id, {
       ...props,
       recordType: RecordType.A,
       target: props.target,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
+  }
+}
+
+/**
+ * Converts the type of a given ARecord DNS name, created outside CDK, to an AliasRecordTarget
+ */
+class ARecordAsAliasTarget implements IAliasRecordTarget {
+  constructor(private readonly aRrecordAttrs: ARecordAttrs) {
+  }
+
+  public bind(record: IRecordSet, zone?: IHostedZone | undefined): AliasRecordTargetConfig {
+    if (!zone) {
+      throw new ValidationError('Cannot bind to record without a zone', record);
+    }
+    return {
+      dnsName: this.aRrecordAttrs.targetDNS,
+      hostedZoneId: this.aRrecordAttrs.zone.hostedZoneId,
+    };
   }
 }
 
@@ -374,6 +585,8 @@ export class AaaaRecord extends RecordSet {
       recordType: RecordType.AAAA,
       target: props.target,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
   }
 }
 
@@ -399,6 +612,8 @@ export class CnameRecord extends RecordSet {
       recordType: RecordType.CNAME,
       target: RecordTarget.fromValues(props.domainName),
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
   }
 }
 
@@ -424,6 +639,8 @@ export class TxtRecord extends RecordSet {
       recordType: RecordType.TXT,
       target: RecordTarget.fromValues(...props.values.map(v => formatTxt(v))),
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
   }
 }
 
@@ -493,6 +710,8 @@ export class SrvRecord extends RecordSet {
       recordType: RecordType.SRV,
       target: RecordTarget.fromValues(...props.values.map(v => `${v.priority} ${v.weight} ${v.port} ${v.hostName}`)),
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
   }
 }
 
@@ -561,6 +780,8 @@ export class CaaRecord extends RecordSet {
       recordType: RecordType.CAA,
       target: RecordTarget.fromValues(...props.values.map(v => `${v.flag} ${v.tag} "${v.value}"`)),
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
   }
 }
 
@@ -589,6 +810,8 @@ export class CaaAmazonRecord extends CaaRecord {
         },
       ],
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
   }
 }
 
@@ -629,6 +852,8 @@ export class MxRecord extends RecordSet {
       recordType: RecordType.MX,
       target: RecordTarget.fromValues(...props.values.map(v => `${v.priority} ${v.hostName}`)),
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
   }
 }
 
@@ -654,6 +879,8 @@ export class NsRecord extends RecordSet {
       recordType: RecordType.NS,
       target: RecordTarget.fromValues(...props.values),
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
   }
 }
 
@@ -679,6 +906,8 @@ export class DsRecord extends RecordSet {
       recordType: RecordType.DS,
       target: RecordTarget.fromValues(...props.values),
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
   }
 }
 
@@ -706,6 +935,8 @@ export class ZoneDelegationRecord extends RecordSet {
       ),
       ttl: props.ttl || Duration.days(2),
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
   }
 }
 
@@ -750,10 +981,21 @@ export interface CrossAccountZoneDelegationRecordProps {
    * @default RemovalPolicy.DESTROY
    */
   readonly removalPolicy?: RemovalPolicy;
+
+  /**
+   * Region from which to obtain temporary credentials.
+   *
+   * @default - the Route53 signing region in the current partition
+   */
+  readonly assumeRoleRegion?: string;
 }
 
 /**
- * A Cross Account Zone Delegation record
+ * A Cross Account Zone Delegation record. This construct uses custom resource lambda that calls Route53
+ * ChangeResourceRecordSets API to upsert a NS record into the `parentHostedZone`.
+ *
+ * WARNING: The default removal policy of this resource is DESTROY, therefore, if this resource's logical ID changes or
+ * if this resource is removed from the stack, the existing NS record will be removed.
  */
 export class CrossAccountZoneDelegationRecord extends Construct {
   constructor(scope: Construct, id: string, props: CrossAccountZoneDelegationRecordProps) {
@@ -767,10 +1009,7 @@ export class CrossAccountZoneDelegationRecord extends Construct {
       throw Error('Only one of parentHostedZoneName and parentHostedZoneId is supported');
     }
 
-    const provider = CustomResourceProvider.getOrCreateProvider(this, CROSS_ACCOUNT_ZONE_DELEGATION_RESOURCE_TYPE, {
-      codeDirectory: path.join(__dirname, 'cross-account-zone-delegation-handler'),
-      runtime: builtInCustomResourceProviderNodeRuntime(this),
-    });
+    const provider = CrossAccountZoneDelegationProvider.getOrCreateProvider(this, CROSS_ACCOUNT_ZONE_DELEGATION_RESOURCE_TYPE);
 
     const role = iam.Role.fromRoleArn(this, 'cross-account-zone-delegation-handler-role', provider.roleArn);
 
@@ -779,8 +1018,6 @@ export class CrossAccountZoneDelegationRecord extends Construct {
       actions: ['sts:AssumeRole'],
       resources: [props.delegationRole.roleArn],
     }));
-
-    const useRegionalStsEndpoint = this.node.tryGetContext(USE_REGIONAL_STS_ENDPOINT_CONTEXT_KEY);
 
     const customResource = new CustomResource(this, 'CrossAccountZoneDelegationCustomResource', {
       resourceType: CROSS_ACCOUNT_ZONE_DELEGATION_RESOURCE_TYPE,
@@ -793,7 +1030,7 @@ export class CrossAccountZoneDelegationRecord extends Construct {
         DelegatedZoneName: props.delegatedZone.zoneName,
         DelegatedZoneNameServers: props.delegatedZone.hostedZoneNameServers!,
         TTL: (props.ttl || Duration.days(2)).toSeconds(),
-        UseRegionalStsEndpoint: useRegionalStsEndpoint ? 'true' : undefined,
+        AssumeRoleRegion: props.assumeRoleRegion,
       },
     });
 

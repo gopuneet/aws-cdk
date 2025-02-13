@@ -2,6 +2,7 @@ import { TestFunction } from './test-function';
 import { Template } from '../../assertions';
 import * as kinesis from '../../aws-kinesis';
 import * as lambda from '../../aws-lambda';
+import { Bucket } from '../../aws-s3';
 import * as cdk from '../../core';
 import * as sources from '../lib';
 
@@ -74,7 +75,6 @@ describe('KinesisEventSource', () => {
       'BatchSize': 100,
       'StartingPosition': 'TRIM_HORIZON',
     });
-
   });
 
   test('specific tumblingWindowInSeconds', () => {
@@ -105,7 +105,6 @@ describe('KinesisEventSource', () => {
       'StartingPosition': 'LATEST',
       'TumblingWindowInSeconds': 60,
     });
-
   });
 
   test('specific batch size', () => {
@@ -134,7 +133,6 @@ describe('KinesisEventSource', () => {
       'BatchSize': 50,
       'StartingPosition': 'LATEST',
     });
-
   });
 
   test('fails if batch size < 1', () => {
@@ -148,7 +146,6 @@ describe('KinesisEventSource', () => {
       batchSize: 0,
       startingPosition: lambda.StartingPosition.LATEST,
     }))).toThrow(/Maximum batch size must be between 1 and 10000 inclusive \(given 0\)/);
-
   });
 
   test('fails if batch size > 10000', () => {
@@ -162,7 +159,6 @@ describe('KinesisEventSource', () => {
       batchSize: 10001,
       startingPosition: lambda.StartingPosition.LATEST,
     }))).toThrow(/Maximum batch size must be between 1 and 10000 inclusive \(given 10001\)/);
-
   });
 
   test('accepts if batch size is a token', () => {
@@ -176,7 +172,6 @@ describe('KinesisEventSource', () => {
       batchSize: cdk.Lazy.number({ produce: () => 10 }),
       startingPosition: lambda.StartingPosition.LATEST,
     }));
-
   });
 
   test('specific maxBatchingWindow', () => {
@@ -205,7 +200,6 @@ describe('KinesisEventSource', () => {
       'MaximumBatchingWindowInSeconds': 120,
       'StartingPosition': 'LATEST',
     });
-
   });
 
   test('contains eventSourceMappingId after lambda binding', () => {
@@ -222,7 +216,6 @@ describe('KinesisEventSource', () => {
 
     // THEN
     expect(eventSource.eventSourceMappingId).toBeDefined();
-
   });
 
   test('contains eventSourceMappingArn after lambda binding', () => {
@@ -239,7 +232,6 @@ describe('KinesisEventSource', () => {
 
     // THEN
     expect(eventSource.eventSourceMappingArn).toBeDefined();
-
   });
 
   test('eventSourceMappingId throws error before binding to lambda', () => {
@@ -252,7 +244,6 @@ describe('KinesisEventSource', () => {
 
     // WHEN/THEN
     expect(() => eventSource.eventSourceMappingId).toThrow(/KinesisEventSource is not yet bound to an event source mapping/);
-
   });
 
   test('eventSourceMappingArn throws error before binding to lambda', () => {
@@ -265,7 +256,6 @@ describe('KinesisEventSource', () => {
 
     // WHEN/THEN
     expect(() => eventSource.eventSourceMappingArn).toThrow(/KinesisEventSource is not yet bound to an event source mapping/);
-
   });
 
   test('event source disabled', () => {
@@ -285,7 +275,6 @@ describe('KinesisEventSource', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::Lambda::EventSourceMapping', {
       'Enabled': false,
     });
-
   });
 
   test('AT_TIMESTAMP starting position', () => {
@@ -305,6 +294,75 @@ describe('KinesisEventSource', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::Lambda::EventSourceMapping', {
       StartingPosition: 'AT_TIMESTAMP',
       StartingPositionTimestamp: 1640995200,
+    });
+  });
+
+  test('S3 onFailure Destination raise unsupport error', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const testLambdaFunction = new TestFunction(stack, 'Fn');
+
+    const stream = new kinesis.Stream(stack, 'S');
+
+    const bucket = Bucket.fromBucketName(stack, 'BucketByName', 'my-bucket');
+    const s3OnFailureDestination = new sources.S3OnFailureDestination(bucket);
+
+    expect(() => {
+      // WHEN
+      testLambdaFunction.addEventSource(new sources.KinesisEventSource(stream, {
+        startingPosition: lambda.StartingPosition.AT_TIMESTAMP,
+        startingPositionTimestamp: 1640995200,
+        onFailure: s3OnFailureDestination,
+      }));
+    // THEN
+    }).toThrow('S3 onFailure Destination is not supported for this event source');
+  });
+
+  test('metrics config', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const fn = new TestFunction(stack, 'Fn');
+    const stream = new kinesis.Stream(stack, 'S');
+    const eventSource = new sources.KinesisEventSource(stream, {
+      startingPosition: lambda.StartingPosition.LATEST,
+      enabled: false,
+      metricsConfig: {
+        metrics: [],
+      },
+    });
+
+    // WHEN
+    fn.addEventSource(eventSource);
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::Lambda::EventSourceMapping', {
+      MetricsConfig: {
+        Metrics: [],
+      },
+    });
+  });
+
+  test('metrics config', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const fn = new TestFunction(stack, 'Fn');
+    const stream = new kinesis.Stream(stack, 'S');
+    const eventSource = new sources.KinesisEventSource(stream, {
+      startingPosition: lambda.StartingPosition.LATEST,
+      enabled: false,
+      metricsConfig: {
+        metrics: [lambda.MetricType.EVENT_COUNT],
+      },
+    });
+
+    // WHEN
+    fn.addEventSource(eventSource);
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::Lambda::EventSourceMapping', {
+      MetricsConfig: {
+        Metrics: ['EventCount'],
+      },
     });
   });
 });

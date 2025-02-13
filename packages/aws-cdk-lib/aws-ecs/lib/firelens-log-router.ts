@@ -137,7 +137,6 @@ function renderFirelensConfig(firelensConfig: FirelensConfig): CfnTaskDefinition
       },
     };
   }
-
 }
 
 /**
@@ -168,13 +167,19 @@ export function obtainDefaultFluentBitECRImage(task: TaskDefinition, logDriverCo
   const logName = logDriverConfig && logDriverConfig.logDriver === 'awsfirelens'
     && logDriverConfig.options && logDriverConfig.options.Name;
   if (logName === 'cloudwatch') {
+    const actions = [
+      'logs:CreateLogGroup',
+      'logs:CreateLogStream',
+      'logs:DescribeLogStreams',
+      'logs:PutLogEvents',
+    ];
+
+    if (logDriverConfig && logDriverConfig.options && 'log_retention_days' in logDriverConfig.options) {
+      actions.push('logs:PutRetentionPolicy');
+    }
+
     task.addToTaskRolePolicy(new iam.PolicyStatement({
-      actions: [
-        'logs:CreateLogGroup',
-        'logs:CreateLogStream',
-        'logs:DescribeLogStreams',
-        'logs:PutLogEvents',
-      ],
+      actions,
       resources: ['*'],
     }));
   } else if (logName === 'firehose') {
@@ -205,7 +210,6 @@ export function obtainDefaultFluentBitECRImage(task: TaskDefinition, logDriverCo
  * Firelens log router
  */
 export class FirelensLogRouter extends ContainerDefinition {
-
   /**
    * Firelens configuration
    */

@@ -5,6 +5,7 @@ import { Stack } from 'aws-cdk-lib/core';
 import { Construct } from 'constructs';
 import { Bundling } from './bundling';
 import { BundlingOptions } from './types';
+import { addConstructMetadata } from 'aws-cdk-lib/core/lib/metadata-resource';
 
 /**
  * Properties for a PythonFunction
@@ -18,8 +19,6 @@ export interface PythonFunctionProps extends FunctionOptions {
   /**
    * The runtime environment. Only runtimes of the Python family are
    * supported.
-   *
-   * @default Runtime.PYTHON_3_7
    */
   readonly runtime: Runtime;
 
@@ -76,9 +75,14 @@ export class PythonFunction extends Function {
         entry,
         runtime,
         skip: !Stack.of(scope).bundlingRequired,
+        // define architecture based on the target architecture of the function, possibly overridden in bundling options
+        architecture: props.architecture,
         ...props.bundling,
       }),
       handler: resolvedHandler,
     });
+
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
   }
 }

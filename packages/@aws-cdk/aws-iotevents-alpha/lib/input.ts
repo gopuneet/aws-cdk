@@ -2,6 +2,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import { Resource, IResource, Aws } from 'aws-cdk-lib/core';
 import { Construct } from 'constructs';
 import { CfnInput } from 'aws-cdk-lib/aws-iotevents';
+import { addConstructMetadata } from 'aws-cdk-lib/core/lib/metadata-resource';
 
 /**
  * Represents an AWS IoT Events input.
@@ -26,7 +27,7 @@ export interface IInput extends IResource {
    *
    * @param grantee the principal
    */
-  grantWrite(grantee: iam.IGrantable): iam.Grant
+  grantWrite(grantee: iam.IGrantable): iam.Grant;
 
   /**
    * Grant the indicated permissions on this input to the given IAM principal (Role/Group/User).
@@ -34,7 +35,7 @@ export interface IInput extends IResource {
    * @param grantee the principal
    * @param actions the set of actions to allow (i.e. "iotevents:BatchPutMessage")
    */
-  grant(grantee: iam.IGrantable, ...actions: string[]): iam.Grant
+  grant(grantee: iam.IGrantable, ...actions: string[]): iam.Grant;
 }
 
 abstract class InputBase extends Resource implements IInput {
@@ -64,7 +65,7 @@ export interface InputProps {
    *
    * @default - CloudFormation will generate a unique name of the input
    */
-  readonly inputName?: string,
+  readonly inputName?: string;
 
   /**
    * An expression that specifies an attribute-value pair in a JSON structure.
@@ -102,6 +103,8 @@ export class Input extends InputBase {
     super(scope, id, {
       physicalName: props.inputName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     if (props.attributeJsonPaths.length === 0) {
       throw new Error('attributeJsonPaths property cannot be empty');

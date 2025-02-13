@@ -1,6 +1,9 @@
 import { Construct } from 'constructs';
 import * as ec2 from '../../../aws-ec2';
+import * as elb from '../../../aws-elasticloadbalancing';
 import * as cdk from '../../../core';
+import { addConstructMetadata, MethodMetadata } from '../../../core/lib/metadata-resource';
+import { AvailabilityZoneRebalancing } from '../availability-zone-rebalancing';
 import { BaseService, BaseServiceOptions, DeploymentControllerType, IBaseService, IService, LaunchType } from '../base/base-service';
 import { fromServiceAttributes, extractServiceNameFromArn } from '../base/from-service-attributes';
 import { TaskDefinition } from '../base/task-definition';
@@ -58,6 +61,17 @@ export interface FargateServiceProps extends BaseServiceOptions {
    * @default Latest
    */
   readonly platformVersion?: FargatePlatformVersion;
+
+  /**
+   * Whether to use Availability Zone rebalancing for the service.
+   *
+   * If enabled, `maxHealthyPercent` must be greater than 100, and the service must not be a target
+   * of a Classic Load Balancer.
+   *
+   * @see https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-rebalancing.html
+   * @default AvailabilityZoneRebalancing.DISABLED
+   */
+  readonly availabilityZoneRebalancing?: AvailabilityZoneRebalancing;
 }
 
 /**
@@ -97,7 +111,6 @@ export interface FargateServiceAttributes {
  * @resource AWS::ECS::Service
  */
 export class FargateService extends BaseService implements IFargateService {
-
   /**
    * Imports from the specified service ARN.
    */
@@ -116,6 +129,8 @@ export class FargateService extends BaseService implements IFargateService {
     return fromServiceAttributes(scope, id, attrs);
   }
 
+  private readonly availabilityZoneRebalancingEnabled: boolean;
+
   /**
    * Constructs a new instance of the FargateService class.
    */
@@ -128,6 +143,29 @@ export class FargateService extends BaseService implements IFargateService {
       throw new Error('Only one of SecurityGroup or SecurityGroups can be populated.');
     }
 
+    if (props.availabilityZoneRebalancing === AvailabilityZoneRebalancing.ENABLED &&
+      !cdk.Token.isUnresolved(props.maxHealthyPercent) &&
+      props.maxHealthyPercent === 100) {
+      throw new Error('AvailabilityZoneRebalancing.ENABLED requires maxHealthyPercent > 100');
+    }
+
+    // Platform versions not supporting referencesSecretJsonField, ephemeralStorageGiB, or pidMode on a task definition
+    const unsupportedPlatformVersions = [
+      FargatePlatformVersion.VERSION1_0,
+      FargatePlatformVersion.VERSION1_1,
+      FargatePlatformVersion.VERSION1_2,
+      FargatePlatformVersion.VERSION1_3,
+    ];
+    const isUnsupportedPlatformVersion = props.platformVersion && unsupportedPlatformVersions.includes(props.platformVersion);
+
+    if (props.taskDefinition.ephemeralStorageGiB && isUnsupportedPlatformVersion) {
+      throw new Error(`The ephemeralStorageGiB feature requires platform version ${FargatePlatformVersion.VERSION1_4} or later, got ${props.platformVersion}.`);
+    }
+
+    if (props.taskDefinition.pidMode && isUnsupportedPlatformVersion) {
+      throw new Error(`The pidMode feature requires platform version ${FargatePlatformVersion.VERSION1_4} or later, got ${props.platformVersion}.`);
+    }
+
     super(scope, id, {
       ...props,
       desiredCount: props.desiredCount,
@@ -138,7 +176,13 @@ export class FargateService extends BaseService implements IFargateService {
       cluster: props.cluster.clusterName,
       taskDefinition: props.deploymentController?.type === DeploymentControllerType.EXTERNAL ? undefined : props.taskDefinition.taskDefinitionArn,
       platformVersion: props.platformVersion,
+      availabilityZoneRebalancing: props.availabilityZoneRebalancing,
     }, props.taskDefinition);
+
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
+
+    this.availabilityZoneRebalancingEnabled = props.availabilityZoneRebalancing === AvailabilityZoneRebalancing.ENABLED;
 
     let securityGroups;
     if (props.securityGroup !== undefined) {
@@ -147,12 +191,13 @@ export class FargateService extends BaseService implements IFargateService {
       securityGroups = props.securityGroups;
     }
 
-    this.configureAwsVpcNetworkingWithSecurityGroups(props.cluster.vpc, props.assignPublicIp, props.vpcSubnets, securityGroups);
+    if (!props.deploymentController ||
+      (props.deploymentController.type !== DeploymentControllerType.EXTERNAL)) {
+      this.configureAwsVpcNetworkingWithSecurityGroups(props.cluster.vpc, props.assignPublicIp, props.vpcSubnets, securityGroups);
+    }
 
     this.node.addValidation({
-      validate: () => this.taskDefinition.referencesSecretJsonField
-      && props.platformVersion
-      && SECRET_JSON_FIELD_UNSUPPORTED_PLATFORM_VERSIONS.includes(props.platformVersion)
+      validate: () => this.taskDefinition.referencesSecretJsonField && isUnsupportedPlatformVersion
         ? [`The task definition of this service uses at least one container that references a secret JSON field. This feature requires platform version ${FargatePlatformVersion.VERSION1_4} or later.`]
         : [],
     });
@@ -160,6 +205,21 @@ export class FargateService extends BaseService implements IFargateService {
     this.node.addValidation({
       validate: () => !this.taskDefinition.defaultContainer ? ['A TaskDefinition must have at least one essential container'] : [],
     });
+  }
+
+  /**
+   * Registers the service as a target of a Classic Load Balancer (CLB).
+   *
+   * Don't call this. Call `loadBalancer.addTarget()` instead.
+   *
+   * @override
+   */
+  @MethodMetadata()
+  public attachToClassicLB(loadBalancer: elb.LoadBalancer): void {
+    if (this.availabilityZoneRebalancingEnabled) {
+      throw new Error('AvailabilityZoneRebalancing.ENABLED disallows using the service as a target of a Classic Load Balancer');
+    }
+    super.attachToClassicLB(loadBalancer);
   }
 }
 
@@ -211,10 +271,3 @@ export enum FargatePlatformVersion {
    */
   VERSION1_0 = '1.0.0',
 }
-
-const SECRET_JSON_FIELD_UNSUPPORTED_PLATFORM_VERSIONS = [
-  FargatePlatformVersion.VERSION1_0,
-  FargatePlatformVersion.VERSION1_1,
-  FargatePlatformVersion.VERSION1_2,
-  FargatePlatformVersion.VERSION1_3,
-];

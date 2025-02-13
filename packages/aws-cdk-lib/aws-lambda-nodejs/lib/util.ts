@@ -1,6 +1,7 @@
 import { spawnSync, SpawnSyncOptions } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { Runtime } from '../../aws-lambda';
 
 export interface CallSite {
   getThis(): any;
@@ -116,7 +117,7 @@ export function tryGetModuleVersionFromPkg(mod: string, pkgJson: { [key: string]
   if (fileMatch && !path.isAbsolute(fileMatch[1])) {
     const absoluteFilePath = path.join(path.dirname(pkgPath), fileMatch[1]);
     return `file:${absoluteFilePath}`;
-  };
+  }
 
   return dependencies[mod];
 }
@@ -149,6 +150,7 @@ export function getTsconfigCompilerOptions(tsconfigPath: string): string {
   const compilerOptions = extractTsConfig(tsconfigPath);
   const excludedCompilerOptions = [
     'composite',
+    'charset',
     'noEmit',
     'tsBuildInfoFile',
   ];
@@ -164,7 +166,6 @@ export function getTsconfigCompilerOptions(tsconfigPath: string): string {
 
   let compilerOptionsString = '';
   Object.keys(options).sort().forEach((key: string) => {
-
     if (excludedCompilerOptions.includes(key)) {
       return;
     }
@@ -207,4 +208,22 @@ function extractTsConfig(tsconfigPath: string, previousCompilerOptions?: Record<
     );
   }
   return updatedCompilerOptions;
+}
+
+/**
+ * Detect if a given Node.js runtime uses SDKv2
+ */
+export function isSdkV2Runtime(runtime: Runtime): boolean {
+  const sdkV2RuntimeList = [
+    Runtime.NODEJS,
+    Runtime.NODEJS_4_3,
+    Runtime.NODEJS_6_10,
+    Runtime.NODEJS_8_10,
+    Runtime.NODEJS_10_X,
+    Runtime.NODEJS_12_X,
+    Runtime.NODEJS_14_X,
+    Runtime.NODEJS_16_X,
+  ];
+
+  return sdkV2RuntimeList.some((r) => {return r.family === runtime.family && r.name === runtime.name;});
 }

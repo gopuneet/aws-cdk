@@ -1,12 +1,6 @@
 {
-  "version": "21.0.0",
+  "version": "35.0.0",
   "artifacts": {
-    "Tree": {
-      "type": "cdk:tree",
-      "properties": {
-        "file": "tree.json"
-      }
-    },
     "aws-ecs-integ.assets": {
       "type": "cdk:asset-manifest",
       "properties": {
@@ -20,10 +14,11 @@
       "environment": "aws://unknown-account/unknown-region",
       "properties": {
         "templateFile": "aws-ecs-integ.template.json",
+        "terminationProtection": false,
         "validateOnSynth": false,
         "assumeRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-deploy-role-${AWS::AccountId}-${AWS::Region}",
         "cloudFormationExecutionRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-cfn-exec-role-${AWS::AccountId}-${AWS::Region}",
-        "stackTemplateAssetObjectUrl": "s3://cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}/f2cf17c9d9475564125300e57740e6450262085908d1e392f31dc5f51521becd.json",
+        "stackTemplateAssetObjectUrl": "s3://cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}/a2e4257665d19056143c4db55344ad90c00f21a27d79890e20bf9e89bbdcb527.json",
         "requiresBootstrapStackVersion": 6,
         "bootstrapStackVersionSsmParameter": "/cdk-bootstrap/hnb659fds/version",
         "additionalDependencies": [
@@ -114,7 +109,7 @@
         "/aws-ecs-integ/FargateCluster/capacity": [
           {
             "type": "aws:cdk:warning",
-            "data": "desiredCapacity has been configured. Be aware this will reset the size of your AutoScalingGroup on every deployment. See https://github.com/aws/aws-cdk/issues/5215"
+            "data": "desiredCapacity has been configured. Be aware this will reset the size of your AutoScalingGroup on every deployment. See https://github.com/aws/aws-cdk/issues/5215 [ack: @aws-cdk/aws-autoscaling:desiredCapacitySet]"
           }
         ],
         "/aws-ecs-integ/FargateCluster/capacity/InstanceSecurityGroup/Resource": [
@@ -141,10 +136,10 @@
             "data": "FargateClustercapacityInstanceProfile8294296C"
           }
         ],
-        "/aws-ecs-integ/FargateCluster/capacity/LaunchConfig": [
+        "/aws-ecs-integ/FargateCluster/capacity/LaunchTemplate/Resource": [
           {
             "type": "aws:cdk:logicalId",
-            "data": "FargateClustercapacityLaunchConfig9B95CCB7"
+            "data": "FargateClustercapacityLaunchTemplateD01E44DB"
           }
         ],
         "/aws-ecs-integ/FargateCluster/capacity/ASG": [
@@ -257,6 +252,12 @@
         ]
       },
       "displayName": "aws-ecs-integ"
+    },
+    "Tree": {
+      "type": "cdk:tree",
+      "properties": {
+        "file": "tree.json"
+      }
     }
   }
 }

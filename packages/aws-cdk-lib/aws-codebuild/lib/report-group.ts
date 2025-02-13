@@ -4,6 +4,7 @@ import { renderReportGroupArn, reportGroupArnComponents } from './report-group-u
 import * as iam from '../../aws-iam';
 import * as s3 from '../../aws-s3';
 import * as cdk from '../../core';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
 
 /**
  * The interface representing the ReportGroup resource -
@@ -71,7 +72,7 @@ export enum ReportGroupType {
   /**
    * The report group contains code coverage reports.
    */
-  CODE_COVERAGE = 'CODE_COVERAGE'
+  CODE_COVERAGE = 'CODE_COVERAGE',
 }
 
 /**
@@ -118,14 +119,20 @@ export interface ReportGroupProps {
    *
    * @default TEST
    */
-  readonly type?: ReportGroupType
+  readonly type?: ReportGroupType;
+
+  /**
+   * If true, deleting the report group force deletes the contents of the report group. If false, the report group must be empty before attempting to delete it.
+   *
+   * @default false
+   */
+  readonly deleteReports?: boolean;
 }
 
 /**
  * The ReportGroup resource class.
  */
 export class ReportGroup extends ReportGroupBase {
-
   /**
    * Reference an existing ReportGroup,
    * defined outside of the CDK code,
@@ -151,6 +158,8 @@ export class ReportGroup extends ReportGroupBase {
     super(scope, id, {
       physicalName: props.reportGroupName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
     this.type = props.type ? props.type : ReportGroupType.TEST;
     const resource = new CfnReportGroup(this, 'Resource', {
       type: this.type,
@@ -166,6 +175,7 @@ export class ReportGroup extends ReportGroupBase {
           : undefined,
       },
       name: props.reportGroupName,
+      deleteReports: props.deleteReports,
     });
     resource.applyRemovalPolicy(props.removalPolicy, {
       default: cdk.RemovalPolicy.RETAIN,
@@ -178,5 +188,9 @@ export class ReportGroup extends ReportGroupBase {
       cdk.Fn.select(1, cdk.Fn.split('/', resource.ref)),
     );
     this.exportBucket = props.exportBucket;
+
+    if (props.deleteReports && props.removalPolicy !== cdk.RemovalPolicy.DESTROY) {
+      throw new Error('Cannot use \'deleteReports\' property on a report group without setting removal policy to \'DESTROY\'.');
+    }
   }
 }

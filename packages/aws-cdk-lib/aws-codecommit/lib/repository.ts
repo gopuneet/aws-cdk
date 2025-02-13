@@ -4,7 +4,9 @@ import { CfnRepository } from './codecommit.generated';
 import * as notifications from '../../aws-codestarnotifications';
 import * as events from '../../aws-events';
 import * as iam from '../../aws-iam';
+import * as kms from '../../aws-kms';
 import { ArnFormat, IResource, Lazy, Resource, Stack } from '../../core';
+import { addConstructMetadata, MethodMetadata } from '../../core/lib/metadata-resource';
 
 /**
  * Additional options to pass to the notification rule.
@@ -496,13 +498,19 @@ export interface RepositoryProps {
    * @default - No initialization (create empty repo)
    */
   readonly code?: Code;
+
+  /**
+   * The customer managed key used to encrypt and decrypt the data in repository.
+   *
+   * @default - Use an AWS managed key
+   */
+  readonly kmsKey?: kms.IKey;
 }
 
 /**
  * Provides a CodeCommit Repository.
  */
 export class Repository extends RepositoryBase {
-
   /**
    * Imports a codecommit repository.
    * @param repositoryArn (e.g. `arn:aws:codecommit:us-east-1:123456789012:MyDemoRepo`)
@@ -555,12 +563,15 @@ export class Repository extends RepositoryBase {
     super(scope, id, {
       physicalName: props.repositoryName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const repository = new CfnRepository(this, 'Resource', {
       repositoryName: props.repositoryName,
       repositoryDescription: props.description,
       triggers: Lazy.any({ produce: () => this.triggers }, { omitEmptyArray: true }),
       code: (props.code?.bind(this))?.code,
+      kmsKeyId: props.kmsKey?.keyArn,
     });
 
     this.repositoryName = this.getResourceNameAttribute(repository.attrName);
@@ -578,8 +589,8 @@ export class Repository extends RepositoryBase {
    * @param arn   Arn of the resource that repository events will notify
    * @param options Trigger options to run actions
    */
+  @MethodMetadata()
   public notify(arn: string, options?: RepositoryTriggerOptions): Repository {
-
     let evt = options && options.events;
     if (evt && evt.length > 1 && evt.indexOf(RepositoryEventTrigger.ALL) > -1) {
       evt = [RepositoryEventTrigger.ALL];
@@ -645,7 +656,7 @@ export enum RepositoryEventTrigger {
   ALL = 'all',
   UPDATE_REF = 'updateReference',
   CREATE_REF = 'createReference',
-  DELETE_REF = 'deleteReference'
+  DELETE_REF = 'deleteReference',
 }
 
 /**

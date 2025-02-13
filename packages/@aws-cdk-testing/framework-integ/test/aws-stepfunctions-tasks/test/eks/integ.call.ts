@@ -3,6 +3,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import * as cdk from 'aws-cdk-lib';
 import * as integ from '@aws-cdk/integ-tests-alpha';
+import { KubectlV31Layer } from '@aws-cdk/lambda-layer-kubectl-v31';
 import { EksCall, HttpMethods } from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import { EC2_RESTRICT_DEFAULT_SECURITY_GROUP } from 'aws-cdk-lib/cx-api';
 
@@ -23,8 +24,9 @@ const stack = new cdk.Stack(app, 'aws-stepfunctions-tasks-eks-call-integ-test');
 stack.node.setContext(EC2_RESTRICT_DEFAULT_SECURITY_GROUP, false);
 
 const cluster = new eks.Cluster(stack, 'EksCluster', {
-  version: eks.KubernetesVersion.V1_22,
+  version: eks.KubernetesVersion.V1_30,
   clusterName: 'eksCluster',
+  kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
 });
 
 const executionRole = new iam.Role(stack, 'Role', {
@@ -54,6 +56,8 @@ new cdk.CfnOutput(stack, 'stateMachineArn', {
 
 new integ.IntegTest(app, 'aws-stepfunctions-tasks-eks-call-integ', {
   testCases: [stack],
+  // Test includes assets that are updated weekly. If not disabled, the upgrade PR will fail.
+  diffAssets: false,
   cdkCommandOptions: {
     deploy: {
       args: {

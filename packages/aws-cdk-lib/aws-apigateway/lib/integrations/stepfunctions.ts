@@ -5,14 +5,15 @@ import { AwsIntegration } from './aws';
 import * as iam from '../../../aws-iam';
 import * as sfn from '../../../aws-stepfunctions';
 import { Token } from '../../../core';
+import { ValidationError } from '../../../core/lib/errors';
 import { IntegrationConfig, IntegrationOptions, PassthroughBehavior } from '../integration';
 import { Method } from '../method';
 import { Model } from '../model';
+
 /**
  * Options when configuring Step Functions synchronous integration with Rest API
  */
 export interface StepFunctionsExecutionIntegrationOptions extends IntegrationOptions {
-
   /**
    * Which details of the incoming request must be passed onto the underlying state machine,
    * such as, account id, user identity, request id, etc. The execution input will include a new key `requestContext`:
@@ -83,6 +84,13 @@ export interface StepFunctionsExecutionIntegrationOptions extends IntegrationOpt
    * @default false
    */
   readonly authorizer?: boolean;
+
+  /**
+   * Whether to add default response models with 200, 400, and 500 status codes to the method.
+   *
+   * @default true
+   */
+  readonly useDefaultMethodResponses?: boolean;
 }
 
 /**
@@ -111,13 +119,15 @@ export class StepFunctionsIntegration {
 
 class StepFunctionsExecutionIntegration extends AwsIntegration {
   private readonly stateMachine: sfn.IStateMachine;
+  private readonly useDefaultMethodResponses: boolean;
+
   constructor(stateMachine: sfn.IStateMachine, options: StepFunctionsExecutionIntegrationOptions = {}) {
     super({
       service: 'states',
       action: 'StartSyncExecution',
       options: {
         credentialsRole: options.credentialsRole,
-        integrationResponses: integrationResponse(),
+        integrationResponses: options.integrationResponses ?? integrationResponse(),
         passthroughBehavior: PassthroughBehavior.NEVER,
         requestTemplates: requestTemplates(stateMachine, options),
         ...options,
@@ -125,6 +135,7 @@ class StepFunctionsExecutionIntegration extends AwsIntegration {
     });
 
     this.stateMachine = stateMachine;
+    this.useDefaultMethodResponses = options.useDefaultMethodResponses ?? true;
   }
 
   public bind(method: Method): IntegrationConfig {
@@ -140,14 +151,14 @@ class StepFunctionsExecutionIntegration extends AwsIntegration {
     if (this.stateMachine instanceof sfn.StateMachine) {
       const stateMachineType = (this.stateMachine as sfn.StateMachine).stateMachineType;
       if (stateMachineType !== sfn.StateMachineType.EXPRESS) {
-        throw new Error('State Machine must be of type "EXPRESS". Please use StateMachineType.EXPRESS as the stateMachineType');
+        throw new ValidationError('State Machine must be of type "EXPRESS". Please use StateMachineType.EXPRESS as the stateMachineType', method);
       }
 
-      //if not imported, extract the name from the CFN layer to reach the
-      //literal value if it is given (rather than a token)
+      // if not imported, extract the name from the CFN layer to reach the
+      // literal value if it is given (rather than a token)
       stateMachineName = (this.stateMachine.node.defaultChild as sfn.CfnStateMachine).stateMachineName;
     } else {
-      //imported state machine
+      // imported state machine
       stateMachineName = `StateMachine-${this.stateMachine.stack.node.addr}`;
     }
 
@@ -157,8 +168,10 @@ class StepFunctionsExecutionIntegration extends AwsIntegration {
       deploymentToken = JSON.stringify({ stateMachineName });
     }
 
-    for (const methodResponse of METHOD_RESPONSES) {
-      method.addMethodResponse(methodResponse);
+    if (this.useDefaultMethodResponses) {
+      for (const methodResponse of METHOD_RESPONSES) {
+        method.addMethodResponse(methodResponse);
+      }
     }
 
     return {
@@ -234,9 +247,6 @@ function integrationResponse() {
 
 /**
  * Defines the request template that will be used for the integration
- * @param stateMachine
- * @param options
- * @returns requestTemplate
  */
 function requestTemplates(stateMachine: sfn.IStateMachine, options: StepFunctionsExecutionIntegrationOptions) {
   const templateStr = templateString(stateMachine, options);
@@ -252,11 +262,6 @@ function requestTemplates(stateMachine: sfn.IStateMachine, options: StepFunction
 /**
  * Reads the VTL template and returns the template string to be used
  * for the request template.
- *
- * @param stateMachine
- * @param includeRequestContext
- * @param options
- * @reutrns templateString
  */
 function templateString(
   stateMachine: sfn.IStateMachine,

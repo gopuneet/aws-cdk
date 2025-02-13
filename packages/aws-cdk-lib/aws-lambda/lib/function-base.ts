@@ -13,7 +13,9 @@ import { addAlias, flatMap } from './util';
 import * as cloudwatch from '../../aws-cloudwatch';
 import * as ec2 from '../../aws-ec2';
 import * as iam from '../../aws-iam';
-import { Annotations, ArnFormat, IResource, Resource, Token } from '../../core';
+import { Annotations, ArnFormat, IResource, Resource, Token, Stack } from '../../core';
+import { ValidationError } from '../../core/lib/errors';
+import { MethodMetadata } from '../../core/lib/metadata-resource';
 
 export interface IFunction extends IResource, ec2.IConnectable, iam.IGrantable {
 
@@ -98,9 +100,25 @@ export interface IFunction extends IResource, ec2.IConnectable, iam.IGrantable {
   grantInvoke(identity: iam.IGrantable): iam.Grant;
 
   /**
+   * Grant the given identity permissions to invoke the $LATEST version or
+   * unqualified version of this Lambda
+   */
+  grantInvokeLatestVersion(identity: iam.IGrantable): iam.Grant;
+
+  /**
+   * Grant the given identity permissions to invoke the given version of this Lambda
+   */
+  grantInvokeVersion(identity: iam.IGrantable, version: IVersion): iam.Grant;
+
+  /**
    * Grant the given identity permissions to invoke this Lambda Function URL
    */
   grantInvokeUrl(identity: iam.IGrantable): iam.Grant;
+
+  /**
+   * Grant multiple principals the ability to invoke this Lambda via CompositePrincipal
+   */
+  grantInvokeCompositePrincipal(compositePrincipal: iam.CompositePrincipal): iam.Grant[];
 
   /**
    * Return the given named metric for this Lambda
@@ -131,11 +149,11 @@ export interface IFunction extends IResource, ec2.IConnectable, iam.IGrantable {
   /**
    * Adds an event source to this function.
    *
-   * Event sources are implemented in the @aws-cdk/aws-lambda-event-sources module.
+   * Event sources are implemented in the aws-cdk-lib/aws-lambda-event-sources module.
    *
    * The following example adds an SQS Queue as an event source:
    * ```
-   * import { SqsEventSource } from '@aws-cdk/aws-lambda-event-sources';
+   * import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
    * myFunction.addEventSource(new SqsEventSource(myQueue));
    * ```
    */
@@ -300,7 +318,7 @@ export abstract class FunctionBase extends Resource implements IFunction, ec2.IC
   protected _invocationGrants: Record<string, iam.Grant> = {};
 
   /**
-   * Mapping of fucntion URL invocation principals to grants. Used to de-dupe `grantInvokeUrl()` calls.
+   * Mapping of function URL invocation principals to grants. Used to de-dupe `grantInvokeUrl()` calls.
    * @internal
    */
   protected _functionUrlInvocationGrants: Record<string, iam.Grant> = {};
@@ -325,7 +343,7 @@ export abstract class FunctionBase extends Resource implements IFunction, ec2.IC
   }
 
   protected warnInvokeFunctionPermissions(scope: Construct): void {
-    Annotations.of(scope).addWarning([
+    Annotations.of(scope).addWarningV2('@aws-cdk/aws-lambda:addPermissionsToVersionOrAlias', [
       "AWS Lambda has changed their authorization strategy, which may cause client invocations using the 'Qualifier' parameter of the lambda function to fail with Access Denied errors.",
       "If you are using a lambda Version or Alias, make sure to call 'grantInvoke' or 'addPermission' on the Version or Alias, not the underlying Function",
       'See: https://github.com/aws/aws-cdk/issues/19273',
@@ -339,7 +357,9 @@ export abstract class FunctionBase extends Resource implements IFunction, ec2.IC
    */
   public addPermission(id: string, permission: Permission) {
     if (!this.canCreatePermissions) {
-      // FIXME: @deprecated(v2) - throw an error if calling `addPermission` on a resource that doesn't support it.
+      if (!this._skipPermissions) {
+        Annotations.of(this).addWarningV2('UnclearLambdaEnvironment', `addPermission() has no effect on a Lambda Function with region=${this.env.region}, account=${this.env.account}, in a Stack with region=${Stack.of(this).region}, account=${Stack.of(this).account}. Suppress this warning if this is is intentional, or pass sameEnvironment=true to fromFunctionAttributes() if you would like to add the permissions.`);
+      }
       return;
     }
 
@@ -383,7 +403,7 @@ export abstract class FunctionBase extends Resource implements IFunction, ec2.IC
   public get connections(): ec2.Connections {
     if (!this._connections) {
       // eslint-disable-next-line max-len
-      throw new Error('Only VPC-associated Lambda Functions have security groups to manage. Supply the "vpc" parameter when creating the Lambda, or "securityGroupId" when importing it.');
+      throw new ValidationError('Only VPC-associated Lambda Functions have security groups to manage. Supply the "vpc" parameter when creating the Lambda, or "securityGroupId" when importing it.', this);
     }
     return this._connections;
   }
@@ -433,6 +453,40 @@ export abstract class FunctionBase extends Resource implements IFunction, ec2.IC
   }
 
   /**
+   * Grant the given identity permissions to invoke the $LATEST version or
+   * unqualified version of this Lambda
+   */
+  public grantInvokeLatestVersion(grantee: iam.IGrantable): iam.Grant {
+    return this.grantInvokeVersion(grantee, this.latestVersion);
+  }
+
+  /**
+   * Grant the given identity permissions to invoke the given version of this Lambda
+   */
+  public grantInvokeVersion(grantee: iam.IGrantable, version: IVersion): iam.Grant {
+    const hash = createHash('sha256')
+      .update(JSON.stringify({
+        principal: grantee.grantPrincipal.toString(),
+        conditions: grantee.grantPrincipal.policyFragment.conditions,
+        version: version.version,
+      }), 'utf8')
+      .digest('base64');
+    const identifier = `Invoke${hash}`;
+
+    // Memoize the result so subsequent grantInvoke() calls are idempotent
+    let grant = this._invocationGrants[identifier];
+    if (!grant) {
+      let resouceArns = [`${this.functionArn}:${version.version}`];
+      if (version == this.latestVersion) {
+        resouceArns.push(this.functionArn);
+      }
+      grant = this.grant(grantee, identifier, 'lambda:InvokeFunction', resouceArns);
+      this._invocationGrants[identifier] = grant;
+    }
+    return grant;
+  }
+
+  /**
    * Grant the given identity permissions to invoke this Lambda Function URL
    */
   public grantInvokeUrl(grantee: iam.IGrantable): iam.Grant {
@@ -449,13 +503,20 @@ export abstract class FunctionBase extends Resource implements IFunction, ec2.IC
     return grant;
   }
 
+  /**
+   * Grant multiple principals the ability to invoke this Lambda via CompositePrincipal
+   */
+  public grantInvokeCompositePrincipal(compositePrincipal: iam.CompositePrincipal): iam.Grant[] {
+    return compositePrincipal.principals.map((principal) => this.grantInvoke(principal));
+  }
+
   public addEventSource(source: IEventSource) {
     source.bind(this);
   }
 
   public configureAsyncInvoke(options: EventInvokeConfigOptions): void {
     if (this.node.tryFindChild('EventInvokeConfig') !== undefined) {
-      throw new Error(`An EventInvokeConfig has already been configured for the function at ${this.node.path}`);
+      throw new ValidationError(`An EventInvokeConfig has already been configured for the function at ${this.node.path}`, this);
     }
 
     new EventInvokeConfig(this, 'EventInvokeConfig', {
@@ -526,9 +587,9 @@ export abstract class FunctionBase extends Resource implements IFunction, ec2.IC
 
           const permissionNode = this._functionNode().tryFindChild(identifier);
           if (!permissionNode && !this._skipPermissions) {
-            throw new Error('Cannot modify permission to lambda function. Function is either imported or $LATEST version.\n'
+            throw new ValidationError('Cannot modify permission to lambda function. Function is either imported or $LATEST version.\n'
               + 'If the function is imported from the same account use `fromFunctionAttributes()` API with the `sameEnvironment` flag.\n'
-              + 'If the function is imported from a different account and already has the correct permissions use `fromFunctionAttributes()` API with the `skipPermissions` flag.');
+              + 'If the function is imported from a different account and already has the correct permissions use `fromFunctionAttributes()` API with the `skipPermissions` flag.', this);
           }
           return { statementAdded: true, policyDependable: permissionNode };
         },
@@ -594,8 +655,8 @@ export abstract class FunctionBase extends Resource implements IFunction, ec2.IC
       }
     }
 
-    throw new Error(`Invalid principal type for Lambda permission statement: ${principal.constructor.name}. ` +
-      'Supported: AccountPrincipal, ArnPrincipal, ServicePrincipal, OrganizationPrincipal');
+    throw new ValidationError(`Invalid principal type for Lambda permission statement: ${principal.constructor.name}. ` +
+      'Supported: AccountPrincipal, ArnPrincipal, ServicePrincipal, OrganizationPrincipal', this);
 
     /**
      * Returns the value at the key if the object contains the key and nothing else. Otherwise,
@@ -606,13 +667,12 @@ export abstract class FunctionBase extends Resource implements IFunction, ec2.IC
 
       return obj[key];
     }
-
   }
 
   private validateConditionCombinations(principal: iam.IPrincipal): {
-    sourceArn: string | undefined,
-    sourceAccount: string | undefined,
-    principalOrgID: string | undefined,
+    sourceArn: string | undefined;
+    sourceAccount: string | undefined;
+    principalOrgID: string | undefined;
   } | undefined {
     const conditions = this.validateConditions(principal);
 
@@ -624,7 +684,7 @@ export abstract class FunctionBase extends Resource implements IFunction, ec2.IC
 
     // PrincipalOrgID cannot be combined with any other conditions
     if (principalOrgID && (sourceArn || sourceAccount)) {
-      throw new Error('PrincipalWithConditions had unsupported condition combinations for Lambda permission statement: principalOrgID cannot be set with other conditions.');
+      throw new ValidationError('PrincipalWithConditions had unsupported condition combinations for Lambda permission statement: principalOrgID cannot be set with other conditions.', this);
     }
 
     return {
@@ -666,8 +726,8 @@ export abstract class FunctionBase extends Resource implements IFunction, ec2.IC
       if (unsupportedConditions.length == 0) {
         return conditions;
       } else {
-        throw new Error(`PrincipalWithConditions had unsupported conditions for Lambda permission statement: ${JSON.stringify(unsupportedConditions)}. ` +
-          `Supported operator/condition pairs: ${JSON.stringify(supportedPrincipalConditions)}`);
+        throw new ValidationError(`PrincipalWithConditions had unsupported conditions for Lambda permission statement: ${JSON.stringify(unsupportedConditions)}. ` +
+          `Supported operator/condition pairs: ${JSON.stringify(supportedPrincipalConditions)}`, this);
       }
     }
 
@@ -702,7 +762,7 @@ export abstract class QualifiedFunctionBase extends FunctionBase {
 
   public configureAsyncInvoke(options: EventInvokeConfigOptions): void {
     if (this.node.tryFindChild('EventInvokeConfig') !== undefined) {
-      throw new Error(`An EventInvokeConfig has already been configured for the qualified function at ${this.node.path}`);
+      throw new ValidationError(`An EventInvokeConfig has already been configured for the qualified function at ${this.node.path}`, this);
     }
 
     new EventInvokeConfig(this, 'EventInvokeConfig', {
@@ -758,13 +818,14 @@ class LatestVersion extends FunctionBase implements IVersion {
   }
 
   public get edgeArn(): never {
-    throw new Error('$LATEST function version cannot be used for Lambda@Edge');
+    throw new ValidationError('$LATEST function version cannot be used for Lambda@Edge', this);
   }
 
   public get resourceArnsForGrantInvoke() {
     return [this.functionArn];
   }
 
+  @MethodMetadata()
   public addAlias(aliasName: string, options: AliasOptions = {}) {
     return addAlias(this, this, aliasName, options);
   }

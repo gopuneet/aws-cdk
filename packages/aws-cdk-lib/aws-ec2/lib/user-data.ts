@@ -59,7 +59,7 @@ export interface S3DownloadOptions {
    * The region of the S3 Bucket (needed for access via VPC Gateway)
    * @default none
    */
-  readonly region?: string
+  readonly region?: string;
 
 }
 
@@ -148,7 +148,6 @@ export abstract class UserData {
    * Adds a command which will send a cfn-signal when the user data script ends
    */
   public abstract addSignalOnExitCommand( resource: Resource ): void;
-
 }
 
 /**
@@ -329,7 +328,7 @@ export interface MultipartBodyOptions {
    *
    * @default undefined - body will not be added to part
    */
-  readonly body?: string,
+  readonly body?: string;
 }
 
 /**

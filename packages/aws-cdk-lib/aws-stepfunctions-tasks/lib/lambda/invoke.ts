@@ -5,11 +5,7 @@ import * as sfn from '../../../aws-stepfunctions';
 import * as cdk from '../../../core';
 import { integrationResourceArn, validatePatternSupported } from '../private/task-utils';
 
-/**
- * Properties for invoking a Lambda function with LambdaInvoke
- */
-export interface LambdaInvokeProps extends sfn.TaskStateBaseProps {
-
+interface LambdaInvokeBaseProps {
   /**
    * Lambda function to invoke
    */
@@ -18,7 +14,7 @@ export interface LambdaInvokeProps extends sfn.TaskStateBaseProps {
   /**
    * The JSON that will be supplied as input to the Lambda function
    *
-   * @default - The state input (JSON path '$')
+   * @default - The state input (JSONata: '{% $states.input %}', JSONPath: '$')
    */
   readonly payload?: sfn.TaskInput;
 
@@ -63,8 +59,9 @@ export interface LambdaInvokeProps extends sfn.TaskStateBaseProps {
   /**
    * Whether to retry on Lambda service exceptions.
    *
-   * This handles `Lambda.ServiceException`, `Lambda.AWSLambdaException` and
-   * `Lambda.SdkClientException` with an interval of 2 seconds, a back-off rate
+   * This handles `Lambda.ServiceException`, `Lambda.AWSLambdaException`,
+   * `Lambda.SdkClientException`, and `Lambda.ClientExecutionTimeoutException`
+   * with an interval of 2 seconds, a back-off rate
    * of 2 and 6 maximum attempts.
    *
    * @see https://docs.aws.amazon.com/step-functions/latest/dg/bp-lambda-serviceexception.html
@@ -75,11 +72,45 @@ export interface LambdaInvokeProps extends sfn.TaskStateBaseProps {
 }
 
 /**
+ * Properties for invoking a Lambda function with LambdaInvoke using JsonPath
+ */
+export interface LambdaInvokeJsonPathProps extends LambdaInvokeBaseProps, sfn.TaskStateJsonPathBaseProps { }
+
+/**
+ * Properties for invoking a Lambda function with LambdaInvoke using Jsonata
+ */
+export interface LambdaInvokeJsonataProps extends LambdaInvokeBaseProps, sfn.TaskStateJsonataBaseProps { }
+
+/**
+ * Properties for invoking a Lambda function with LambdaInvoke
+ */
+export interface LambdaInvokeProps extends LambdaInvokeBaseProps, sfn.TaskStateBaseProps { }
+
+/**
  * Invoke a Lambda function as a Task
  *
  * @see https://docs.aws.amazon.com/step-functions/latest/dg/connect-lambda.html
  */
 export class LambdaInvoke extends sfn.TaskStateBase {
+  /**
+   * Invoke a Lambda function as a Task using JSONPath
+   *
+   * @see https://docs.aws.amazon.com/step-functions/latest/dg/connect-lambda.html
+   */
+  public static jsonPath(scope: Construct, id: string, props: LambdaInvokeJsonPathProps) {
+    return new LambdaInvoke(scope, id, props);
+  }
+  /**
+   * Invoke a Lambda function as a Task using JSONata
+   *
+   * @see https://docs.aws.amazon.com/step-functions/latest/dg/connect-lambda.html
+   */
+  public static jsonata(scope: Construct, id: string, props: LambdaInvokeJsonataProps) {
+    return new LambdaInvoke(scope, id, {
+      ...props,
+      queryLanguage: sfn.QueryLanguage.JSONATA,
+    });
+  }
 
   private static readonly SUPPORTED_INTEGRATION_PATTERNS: sfn.IntegrationPattern[] = [
     sfn.IntegrationPattern.REQUEST_RESPONSE,
@@ -128,7 +159,7 @@ export class LambdaInvoke extends sfn.TaskStateBase {
     if (props.retryOnServiceExceptions ?? true) {
       // Best practice from https://docs.aws.amazon.com/step-functions/latest/dg/bp-lambda-serviceexception.html
       this.addRetry({
-        errors: ['Lambda.ServiceException', 'Lambda.AWSLambdaException', 'Lambda.SdkClientException'],
+        errors: ['Lambda.ClientExecutionTimeoutException', 'Lambda.ServiceException', 'Lambda.AWSLambdaException', 'Lambda.SdkClientException'],
         interval: cdk.Duration.seconds(2),
         maxAttempts: 6,
         backoffRate: 2,
@@ -142,24 +173,23 @@ export class LambdaInvoke extends sfn.TaskStateBase {
   /**
    * @internal
    */
-  protected _renderTask(): any {
-    if (this.props.payloadResponseOnly) {
-      return {
-        Resource: this.props.lambdaFunction.functionArn,
-        ...this.props.payload && { Parameters: sfn.FieldUtils.renderObject(this.props.payload.value) },
-      };
-    } else {
-      return {
-        Resource: integrationResourceArn('lambda', 'invoke', this.integrationPattern),
-        Parameters: sfn.FieldUtils.renderObject({
-          FunctionName: this.props.lambdaFunction.functionArn,
-          Payload: this.props.payload ? this.props.payload.value : sfn.TaskInput.fromJsonPathAt('$').value,
-          InvocationType: this.props.invocationType,
-          ClientContext: this.props.clientContext,
-          Qualifier: this.props.qualifier,
-        }),
-      };
-    }
+  protected _renderTask(topLevelQueryLanguage?: sfn.QueryLanguage): any {
+    const queryLanguage = sfn._getActualQueryLanguage(topLevelQueryLanguage, this.props.queryLanguage);
+    const [resource, paramOrArg] = this.props.payloadResponseOnly ?
+      [this.props.lambdaFunction.functionArn, this.props.payload?.value] :
+      [integrationResourceArn('lambda', 'invoke', this.integrationPattern), {
+        FunctionName: this.props.lambdaFunction.functionArn,
+        Payload: this.props.payload?.value ??
+          (queryLanguage === sfn.QueryLanguage.JSONATA ? '{% $states.input %}'
+            : sfn.TaskInput.fromJsonPathAt('$').value),
+        InvocationType: this.props.invocationType,
+        ClientContext: this.props.clientContext,
+        Qualifier: this.props.qualifier,
+      }];
+    return {
+      Resource: resource,
+      ...this._renderParametersOrArguments(paramOrArg, queryLanguage),
+    };
   }
 }
 
@@ -186,5 +216,5 @@ export enum LambdaInvocationType {
   /**
    * Validate parameter values and verify that the user or role has permission to invoke the function.
    */
-  DRY_RUN = 'DryRun'
+  DRY_RUN = 'DryRun',
 }

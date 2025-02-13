@@ -5,12 +5,13 @@ import { Construct } from 'constructs';
 import { IGameSessionQueue } from './game-session-queue';
 import * as gamelift from 'aws-cdk-lib/aws-gamelift';
 import { MatchmakingConfigurationProps, GameProperty, MatchmakingConfigurationBase, IMatchmakingConfiguration } from './matchmaking-configuration';
+import { addConstructMetadata, MethodMetadata } from 'aws-cdk-lib/core/lib/metadata-resource';
 
 /**
  * Properties for a new queued matchmaking configuration
  */
 export interface QueuedMatchmakingConfigurationProps extends MatchmakingConfigurationProps {
-/**
+  /**
    * The number of player slots in a match to keep open for future players.
    * For example, if the configuration's rule set specifies a match for a single 12-person team, and the additional player count is set to 2, only 10 players are selected for the match.
    *
@@ -67,7 +68,6 @@ export interface QueuedMatchmakingConfigurationProps extends MatchmakingConfigur
  * @resource AWS::GameLift::MatchmakingConfiguration
  */
 export class QueuedMatchmakingConfiguration extends MatchmakingConfigurationBase {
-
   /**
    * Import an existing matchmaking configuration from its name.
    */
@@ -83,13 +83,15 @@ export class QueuedMatchmakingConfiguration extends MatchmakingConfigurationBase
   }
 
   /**
-     * The name of the matchmaking configuration.
-     */
+   * The name of the matchmaking configuration.
+   */
   public readonly matchmakingConfigurationName: string;
+
   /**
-     * The ARN of the matchmaking configuration.
-     */
+   * The ARN of the matchmaking configuration.
+   */
   public readonly matchmakingConfigurationArn: string;
+
   /**
    * The notification target for matchmaking events
    */
@@ -104,6 +106,8 @@ export class QueuedMatchmakingConfiguration extends MatchmakingConfigurationBase
     super(scope, id, {
       physicalName: props.matchmakingConfigurationName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     if (props.matchmakingConfigurationName && !cdk.Token.isUnresolved(props.matchmakingConfigurationName)) {
       if (props.matchmakingConfigurationName.length > 128) {
@@ -141,7 +145,7 @@ export class QueuedMatchmakingConfiguration extends MatchmakingConfigurationBase
       throw new Error(`Matchmaking configuration request timeout can not exceed 43200 seconds, actual ${props.requestTimeout.toSeconds()} seconds.`);
     }
 
-    //Notification target
+    // Notification target
     this.notificationTarget = props.notificationTarget;
     if (!this.notificationTarget) {
       this.notificationTarget = new sns.Topic(this, 'Topic', {});
@@ -190,6 +194,7 @@ export class QueuedMatchmakingConfiguration extends MatchmakingConfigurationBase
    *
    * @param gameSessionQueue A game session queue
    */
+  @MethodMetadata()
   public addGameSessionQueue(gameSessionQueue: IGameSessionQueue) {
     this.gameSessionQueues.push(gameSessionQueue);
   }
@@ -216,5 +221,4 @@ export class QueuedMatchmakingConfiguration extends MatchmakingConfigurationBase
       };
     }
   }
-
 }

@@ -9,7 +9,7 @@ import { Action, CodeCommitTrigger, GitHubTrigger, S3Trigger } from '../../../aw
 import { IRepository } from '../../../aws-ecr';
 import * as iam from '../../../aws-iam';
 import { IBucket } from '../../../aws-s3';
-import { Fn, SecretValue, Token } from '../../../core';
+import { Fn, SecretValue, Token, UnscopedValidationError } from '../../../core';
 import { FileSet, Step } from '../blueprint';
 
 /**
@@ -101,7 +101,7 @@ export abstract class CodePipelineSource extends Step implements ICodePipelineAc
    * If you need access to symlinks or the repository history, be sure to set
    * `codeBuildCloneOutput`.
    *
-   * @param repoString A string that encodes owner and repository separated by a slash (e.g. 'owner/repo').
+   * @param repoString A string that encodes owner and repository separated by a slash (e.g. 'owner/repo'). The provided string must be resolvable at runtime.
    * @param branch The branch to use.
    * @param props The source properties, including the connection ARN.
    *
@@ -257,7 +257,7 @@ class GitHubSource extends CodePipelineSource {
 
     const parts = repoString.split('/');
     if (Token.isUnresolved(repoString) || parts.length !== 2) {
-      throw new Error(`GitHub repository name should be a resolved string like '<owner>/<repo>', got '${repoString}'`);
+      throw new UnscopedValidationError(`GitHub repository name should be a resolved string like '<owner>/<repo>', got '${repoString}'`);
     }
     this.owner = parts[0];
     this.repo = parts[1];
@@ -424,13 +424,33 @@ class CodeStarConnectionSource extends CodePipelineSource {
   constructor(repoString: string, readonly branch: string, readonly props: ConnectionSourceOptions) {
     super(repoString);
 
-    const parts = repoString.split('/');
-    if (Token.isUnresolved(repoString) || parts.length !== 2) {
-      throw new Error(`CodeStar repository name should be a resolved string like '<owner>/<repo>', got '${repoString}'`);
+    if (!this.isValidRepoString(repoString)) {
+      throw new UnscopedValidationError(`CodeStar repository name should be a resolved string like '<owner>/<repo>' or '<owner>/<group1>/<group2>/.../<repo>', got '${repoString}'`);
     }
+
+    const parts = repoString.split('/');
+
     this.owner = parts[0];
-    this.repo = parts[1];
+    this.repo = parts.slice(1).join('/');
     this.configurePrimaryOutput(new FileSet('Source', this));
+  }
+
+  private isValidRepoString(repoString: string) {
+    if (Token.isUnresolved(repoString)) {
+      return false;
+    }
+
+    const parts = repoString.split('/');
+
+    // minimum length is 2 (owner/repo) and
+    // maximum length is 22 (owner/parent group/twenty sub groups/repo).
+    // maximum length is based on limitation of GitLab, see https://docs.gitlab.com/ee/user/group/subgroups/
+    if (parts.length < 2 || parts.length > 23) {
+      return false;
+    }
+
+    // check if all element in parts is not empty
+    return parts.every(element => element !== '');
   }
 
   protected getAction(output: Artifact, actionName: string, runOrder: number, variablesNamespace?: string) {

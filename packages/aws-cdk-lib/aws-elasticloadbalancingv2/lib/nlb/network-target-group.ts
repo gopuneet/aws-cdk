@@ -2,6 +2,7 @@ import { Construct } from 'constructs';
 import { INetworkListener } from './network-listener';
 import * as cloudwatch from '../../../aws-cloudwatch';
 import * as cdk from '../../../core';
+import { ValidationError } from '../../../core/lib/errors';
 import {
   BaseTargetGroupProps, HealthCheck, ITargetGroup, loadBalancerNameFromListenerArn, LoadBalancerTargetProps,
   TargetGroupAttributes, TargetGroupBase, TargetGroupImportProps,
@@ -171,7 +172,6 @@ export class NetworkTargetGroup extends TargetGroupBase implements INetworkTarge
       this.setAttribute('deregistration_delay.connection_termination.enabled', props.connectionTermination ? 'true' : 'false');
     }
     this.addTarget(...(props.targets || []));
-
   }
 
   public get metrics(): INetworkTargetGroupMetrics {
@@ -226,7 +226,7 @@ export class NetworkTargetGroup extends TargetGroupBase implements INetworkTarge
    */
   public get firstLoadBalancerFullName(): string {
     if (this.listeners.length === 0) {
-      throw new Error('The TargetGroup needs to be attached to a LoadBalancer before you can call this method');
+      throw new ValidationError('The TargetGroup needs to be attached to a LoadBalancer before you can call this method', this);
     }
     return loadBalancerNameFromListenerArn(this.listeners[0].listenerArn);
   }
@@ -259,14 +259,6 @@ export class NetworkTargetGroup extends TargetGroupBase implements INetworkTarge
       }
     }
 
-    if (healthCheck.healthyThresholdCount && healthCheck.unhealthyThresholdCount &&
-      healthCheck.healthyThresholdCount !== healthCheck.unhealthyThresholdCount) {
-      ret.push([
-        `Healthy and Unhealthy Threshold Counts must be the same: ${healthCheck.healthyThresholdCount}`,
-        `is not equal to ${healthCheck.unhealthyThresholdCount}.`,
-      ].join(' '));
-    }
-
     if (!healthCheck.protocol) {
       return ret;
     }
@@ -280,11 +272,14 @@ export class NetworkTargetGroup extends TargetGroupBase implements INetworkTarge
         `Must be one of [${NLB_PATH_HEALTH_CHECK_PROTOCOLS.join(', ')}]`,
       ].join(' '));
     }
-    if (healthCheck.timeout && healthCheck.timeout.toSeconds() !== NLB_HEALTH_CHECK_TIMEOUTS[healthCheck.protocol]) {
-      ret.push([
-        'Custom health check timeouts are not supported for Network Load Balancer health checks.',
-        `Expected ${NLB_HEALTH_CHECK_TIMEOUTS[healthCheck.protocol]} seconds for ${healthCheck.protocol}, got ${healthCheck.timeout.toSeconds()}`,
-      ].join(' '));
+
+    const lowHealthCheckTimeout = 2;
+    const highHealthCheckTimeout = 120;
+    if (healthCheck.timeout) {
+      const timeoutSeconds = healthCheck.timeout.toSeconds();
+      if (timeoutSeconds < lowHealthCheckTimeout || timeoutSeconds > highHealthCheckTimeout) {
+        ret.push(`Health check timeout '${timeoutSeconds}' not supported. Must be a number between ${lowHealthCheckTimeout} and ${highHealthCheckTimeout}.`);
+      }
     }
 
     return ret;
@@ -330,9 +325,9 @@ class ImportedNetworkTargetGroup extends ImportedTargetGroupBase implements INet
 
   public get metrics(): INetworkTargetGroupMetrics {
     if (!this._metrics) {
-      throw new Error(
+      throw new ValidationError(
         'The imported NetworkTargetGroup needs the associated NetworkLoadBalancer to be able to provide metrics. ' +
-        'Please specify the ARN value when importing it.');
+        'Please specify the ARN value when importing it.', this);
     }
     return this._metrics;
   }
@@ -345,7 +340,7 @@ class ImportedNetworkTargetGroup extends ImportedTargetGroupBase implements INet
     for (const target of targets) {
       const result = target.attachToNetworkTargetGroup(this);
       if (result.targetJson !== undefined) {
-        throw new Error('Cannot add a non-self registering target to an imported TargetGroup. Create a new TargetGroup instead.');
+        throw new ValidationError('Cannot add a non-self registering target to an imported TargetGroup. Create a new TargetGroup instead.', this);
       }
     }
   }
@@ -366,8 +361,3 @@ export interface INetworkLoadBalancerTarget {
 
 const NLB_HEALTH_CHECK_PROTOCOLS = [Protocol.HTTP, Protocol.HTTPS, Protocol.TCP];
 const NLB_PATH_HEALTH_CHECK_PROTOCOLS = [Protocol.HTTP, Protocol.HTTPS];
-const NLB_HEALTH_CHECK_TIMEOUTS: { [protocol in Protocol]?: number } = {
-  [Protocol.HTTP]: 6,
-  [Protocol.HTTPS]: 10,
-  [Protocol.TCP]: 10,
-};

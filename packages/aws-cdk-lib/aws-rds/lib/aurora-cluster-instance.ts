@@ -1,4 +1,5 @@
 import { Construct } from 'constructs';
+import { CaCertificate } from './ca-certificate';
 import { DatabaseCluster } from './cluster';
 import { IDatabaseCluster } from './cluster-ref';
 import { IParameterGroup, ParameterGroup } from './parameter-group';
@@ -9,7 +10,10 @@ import { ISubnetGroup } from './subnet-group';
 import * as ec2 from '../../aws-ec2';
 import { IRole } from '../../aws-iam';
 import * as kms from '../../aws-kms';
-import { IResource, Resource, Duration, RemovalPolicy, ArnFormat } from '../../core';
+import { IResource, Resource, Duration, RemovalPolicy, ArnFormat, FeatureFlags } from '../../core';
+import { ValidationError } from '../../core/lib/errors';
+import { addConstructMetadata } from '../../core/lib/metadata-resource';
+import { AURORA_CLUSTER_CHANGE_SCOPE_OF_INSTANCE_PARAMETER_GROUP_WITH_EACH_PARAMETERS } from '../../cx-api';
 
 /**
  * Options for binding the instance to the cluster
@@ -128,52 +132,6 @@ export interface ProvisionedClusterInstanceProps extends ClusterInstanceOptions 
    * @default 2
    */
   readonly promotionTier?: number;
-
-  /**
-   * Only used for migrating existing clusters from using `instanceProps` to `writer` and `readers`
-   *
-   * @example
-   * // existing cluster
-   * declare const vpc: ec2.Vpc;
-   * const cluster = new rds.DatabaseCluster(stack, 'Database', {
-   *   engine: rds.DatabaseClusterEngine.auroraMysql({
-   *     version: rds.AuroraMysqlEngineVersion.VER_3_03_0,
-   *   }),
-   *   instances: 2,
-   *   instanceProps: {
-   *     instanceType: ec2.InstanceType.of(ec2.InstanceClass.BURSTABLE3, ec2.InstanceSize.SMALL),
-   *     vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
-   *     vpc,
-   *   },
-   * });
-   *
-   * // migration
-   *
-   * const instanceProps = {
-   *   instanceType: ec2.InstanceType.of(ec2.InstanceClass.BURSTABLE3, ec2.InstanceSize.SMALL),
-   *   isFromLegacyInstanceProps: true,
-   * };
-   *
-   * declare const vpc: ec2.Vpc;
-   * const cluster = new rds.DatabaseCluster(stack, 'Database', {
-   *   engine: rds.DatabaseClusterEngine.auroraMysql({
-   *     version: rds.AuroraMysqlEngineVersion.VER_3_03_0,
-   *   }),
-   *   vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
-   *   vpc,
-   *   writer: ClusterInstance.provisioned('Instance1', {
-   *     ...instanceProps,
-   *   }),
-   *   readers: [
-   *     ClusterInstance.provisioned('Instance2', {
-   *       ...instanceProps,
-   *     }),
-   *   ],
-   * });
-   *
-   * @default false
-   */
-  readonly isFromLegacyInstanceProps?: boolean;
 }
 
 /**
@@ -188,7 +146,7 @@ export interface ServerlessV2ClusterInstanceProps extends ClusterInstanceOptions
    *
    * For serverless v2 instances this means:
    * - true: The serverless v2 reader will scale to match the writer instance (provisioned or serverless)
-   * - false: The serverless v2 reader will scale with the read workfload on the instance
+   * - false: The serverless v2 reader will scale with the read workload on the instance
    *
    * @default false
    */
@@ -198,7 +156,7 @@ export interface ServerlessV2ClusterInstanceProps extends ClusterInstanceOptions
 /**
  * Common options for creating cluster instances (both serverless and provisioned)
  */
-export interface ClusterInstanceProps extends ClusterInstanceOptions{
+export interface ClusterInstanceProps extends ClusterInstanceOptions {
   /**
    * The type of cluster instance to create. Can be either
    * provisioned or serverless v2
@@ -217,13 +175,6 @@ export interface ClusterInstanceProps extends ClusterInstanceOptions{
    * @default 2
    */
   readonly promotionTier?: number;
-
-  /**
-   * Only used for migrating existing clusters from using `instanceProps` to `writer` and `readers`
-   *
-   * @default false
-   */
-  readonly isFromLegacyInstanceProps?: boolean;
 }
 
 /**
@@ -247,7 +198,7 @@ export interface ClusterInstanceOptions {
   /**
    * Whether to enable Performance Insights for the DB instance.
    *
-   * @default - false, unless ``performanceInsightRentention`` or ``performanceInsightEncryptionKey`` is set.
+   * @default - false, unless ``performanceInsightRetention`` or ``performanceInsightEncryptionKey`` is set.
    */
   readonly enablePerformanceInsights?: boolean;
 
@@ -266,11 +217,24 @@ export interface ClusterInstanceOptions {
   readonly performanceInsightEncryptionKey?: kms.IKey;
 
   /**
-   * Indicates whether the DB instance is an internet-facing instance.
+   * Indicates whether the DB instance is an internet-facing instance. If not specified,
+   * the cluster's vpcSubnets will be used to determine if the instance is internet-facing
+   * or not.
    *
-   * @default - true if the instance is placed in a public subnet
+   * @default - `true` if the cluster's `vpcSubnets` is `subnetType: SubnetType.PUBLIC`, `false` otherwise
    */
   readonly publiclyAccessible?: boolean;
+
+  /**
+   * A preferred maintenance window day/time range. Should be specified as a range ddd:hh24:mi-ddd:hh24:mi (24H Clock UTC).
+   *
+   * Example: 'Sun:23:45-Mon:00:15'
+   *
+   * @default - 30-minute window selected at random from an 8-hour block of time for
+   * each AWS Region, occurring on a random day of the week.
+   * @see https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_UpgradeDBInstance.Maintenance.html#Concepts.DBMaintenance
+   */
+  readonly preferredMaintenanceWindow?: string;
 
   /**
    * The parameters in the DBParameterGroup to create automatically
@@ -298,6 +262,67 @@ export interface ClusterInstanceOptions {
    * @default the cluster parameter group is used
    */
   readonly parameterGroup?: IParameterGroup;
+
+  /**
+   * Only used for migrating existing clusters from using `instanceProps` to `writer` and `readers`
+   *
+   * @example
+   * // existing cluster
+   * declare const vpc: ec2.Vpc;
+   * const cluster = new rds.DatabaseCluster(this, 'Database', {
+   *   engine: rds.DatabaseClusterEngine.auroraMysql({
+   *     version: rds.AuroraMysqlEngineVersion.VER_3_03_0,
+   *   }),
+   *   instances: 2,
+   *   instanceProps: {
+   *     instanceType: ec2.InstanceType.of(ec2.InstanceClass.BURSTABLE3, ec2.InstanceSize.SMALL),
+   *     vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+   *     vpc,
+   *   },
+   * });
+   *
+   * // migration
+   *
+   * const instanceProps = {
+   *   instanceType: ec2.InstanceType.of(ec2.InstanceClass.BURSTABLE3, ec2.InstanceSize.SMALL),
+   *   isFromLegacyInstanceProps: true,
+   * };
+   *
+   * const myCluster = new rds.DatabaseCluster(this, 'Database', {
+   *   engine: rds.DatabaseClusterEngine.auroraMysql({
+   *     version: rds.AuroraMysqlEngineVersion.VER_3_03_0,
+   *   }),
+   *   vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+   *   vpc,
+   *   writer: rds.ClusterInstance.provisioned('Instance1', {
+   *     instanceType: instanceProps.instanceType,
+   *     isFromLegacyInstanceProps: instanceProps.isFromLegacyInstanceProps,
+   *   }),
+   *   readers: [
+   *     rds.ClusterInstance.provisioned('Instance2', {
+   *       instanceType: instanceProps.instanceType,
+   *       isFromLegacyInstanceProps: instanceProps.isFromLegacyInstanceProps,
+   *     }),
+   *   ],
+   * });
+   *
+   * @default false
+   */
+  readonly isFromLegacyInstanceProps?: boolean;
+
+  /**
+   * The identifier of the CA certificate for this DB cluster's instances.
+   *
+   * Specifying or updating this property triggers a reboot.
+   *
+   * For RDS DB engines:
+   * @see https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL-certificate-rotation.html
+   * For Aurora DB engines:
+   * @see https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/UsingWithRDS.SSL-certificate-rotation.html
+   *
+   * @default - RDS will choose a certificate authority
+   */
+  readonly caCertificate?: CaCertificate;
 }
 
 /**
@@ -307,7 +332,7 @@ export interface ClusterInstanceOptions {
  * @example
  *
  * declare const vpc: ec2.Vpc;
- * const cluster = new rds.DatabaseCluster(this, 'Database', {
+ * const myCluster = new rds.DatabaseCluster(this, 'Database', {
  *   engine: rds.DatabaseClusterEngine.auroraMysql({ version: rds.AuroraMysqlEngineVersion.VER_2_08_1 }),
  *   writer: rds.ClusterInstance.provisioned('writer', {
  *     instanceType: ec2.InstanceType.of(ec2.InstanceClass.R6G, ec2.InstanceSize.XLARGE4),
@@ -319,7 +344,7 @@ export interface ClusterInstanceOptions {
  *     rds.ClusterInstance.serverlessV2('reader1', { scaleWithWriter: true }),
  *     // will be put in promotion tier 2 and will not scale with the writer
  *     rds.ClusterInstance.serverlessV2('reader2'),
- *   ]
+ *   ],
  *   vpc,
  * });
  */
@@ -328,7 +353,7 @@ export class ClusterInstance implements IClusterInstance {
    * Add a provisioned instance to the cluster
    *
    * @example
-   * ClusterInstance.provisioned('ClusterInstance', {
+   * rds.ClusterInstance.provisioned('ClusterInstance', {
    *   instanceType: ec2.InstanceType.of(ec2.InstanceClass.R6G, ec2.InstanceSize.XLARGE4),
    * });
    */
@@ -343,7 +368,7 @@ export class ClusterInstance implements IClusterInstance {
    * Add a serverless v2 instance to the cluster
    *
    * @example
-   * ClusterInstance.serverlessV2('ClusterInstance', {
+   * rds.ClusterInstance.serverlessV2('ClusterInstance', {
    *   scaleWithWriter: true,
    * });
    */
@@ -413,9 +438,24 @@ export interface IAuroraClusterInstance extends IResource {
   readonly instanceSize?: string;
 
   /**
-   * Te promotion tier the instance was created in
+   * The promotion tier the instance was created in
    */
   readonly tier: number;
+
+  /**
+   * Whether Performance Insights is enabled
+   */
+  readonly performanceInsightsEnabled?: boolean;
+
+  /**
+   * The amount of time, in days, to retain Performance Insights data.
+   */
+  readonly performanceInsightRetention?: PerformanceInsightRetention;
+
+  /**
+   * The AWS KMS key for encryption of Performance Insights data.
+   */
+  readonly performanceInsightEncryptionKey?: kms.IKey;
 }
 
 class AuroraClusterInstance extends Resource implements IAuroraClusterInstance {
@@ -426,6 +466,9 @@ class AuroraClusterInstance extends Resource implements IAuroraClusterInstance {
   public readonly type: InstanceType;
   public readonly tier: number;
   public readonly instanceSize?: string;
+  public readonly performanceInsightsEnabled: boolean;
+  public readonly performanceInsightRetention?: PerformanceInsightRetention;
+  public readonly performanceInsightEncryptionKey?: kms.IKey;
   constructor(scope: Construct, id: string, props: AuroraClusterInstanceProps) {
     super(
       scope,
@@ -433,9 +476,11 @@ class AuroraClusterInstance extends Resource implements IAuroraClusterInstance {
       {
         physicalName: props.instanceIdentifier,
       });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
     this.tier = props.promotionTier ?? 2;
     if (this.tier > 15) {
-      throw new Error('promotionTier must be between 0-15');
+      throw new ValidationError('promotionTier must be between 0-15', this);
     }
 
     const isOwnedResource = Resource.isOwnedResource(props.cluster);
@@ -444,7 +489,8 @@ class AuroraClusterInstance extends Resource implements IAuroraClusterInstance {
     if (isOwnedResource) {
       const ownedCluster = props.cluster as DatabaseCluster;
       internetConnected = ownedCluster.vpc.selectSubnets(ownedCluster.vpcSubnets).internetConnectivityEstablished;
-      publiclyAccessible = ownedCluster.vpcSubnets && ownedCluster.vpcSubnets.subnetType === ec2.SubnetType.PUBLIC;
+      const isInPublicSubnet = ownedCluster.vpcSubnets && ownedCluster.vpcSubnets.subnetType === ec2.SubnetType.PUBLIC;
+      publiclyAccessible = props.publiclyAccessible ?? isInPublicSubnet;
     }
 
     // Get the actual subnet objects so we can depend on internet connectivity.
@@ -457,15 +503,26 @@ class AuroraClusterInstance extends Resource implements IAuroraClusterInstance {
     const enablePerformanceInsights = props.enablePerformanceInsights
       || props.performanceInsightRetention !== undefined || props.performanceInsightEncryptionKey !== undefined;
     if (enablePerformanceInsights && props.enablePerformanceInsights === false) {
-      throw new Error('`enablePerformanceInsights` disabled, but `performanceInsightRetention` or `performanceInsightEncryptionKey` was set');
+      throw new ValidationError('`enablePerformanceInsights` disabled, but `performanceInsightRetention` or `performanceInsightEncryptionKey` was set', this);
     }
+
+    this.performanceInsightsEnabled = enablePerformanceInsights;
+    this.performanceInsightRetention = enablePerformanceInsights
+      ? (props.performanceInsightRetention || PerformanceInsightRetention.DEFAULT)
+      : undefined;
+    this.performanceInsightEncryptionKey = props.performanceInsightEncryptionKey;
 
     const instanceParameterGroup = props.parameterGroup ?? (
       props.parameters
-        ? new ParameterGroup(props.cluster, 'InstanceParameterGroup', {
-          engine: engine,
-          parameters: props.parameters,
-        })
+        ? FeatureFlags.of(this).isEnabled(AURORA_CLUSTER_CHANGE_SCOPE_OF_INSTANCE_PARAMETER_GROUP_WITH_EACH_PARAMETERS)
+          ? new ParameterGroup(this, 'InstanceParameterGroup', {
+            engine: engine,
+            parameters: props.parameters,
+          })
+          : new ParameterGroup(props.cluster, 'InstanceParameterGroup', {
+            engine: engine,
+            parameters: props.parameters,
+          })
         : undefined
     );
     const instanceParameterGroupConfig = instanceParameterGroup?.bindToInstance({});
@@ -481,11 +538,10 @@ class AuroraClusterInstance extends Resource implements IAuroraClusterInstance {
         // Instance properties
         dbInstanceClass: props.instanceType ? databaseInstanceType(instanceType) : undefined,
         publiclyAccessible,
-        enablePerformanceInsights: enablePerformanceInsights || props.enablePerformanceInsights, // fall back to undefined if not set
-        performanceInsightsKmsKeyId: props.performanceInsightEncryptionKey?.keyArn,
-        performanceInsightsRetentionPeriod: enablePerformanceInsights
-          ? (props.performanceInsightRetention || PerformanceInsightRetention.DEFAULT)
-          : undefined,
+        preferredMaintenanceWindow: props.preferredMaintenanceWindow,
+        enablePerformanceInsights: this.performanceInsightsEnabled || props.enablePerformanceInsights, // fall back to undefined if not set
+        performanceInsightsKmsKeyId: this.performanceInsightEncryptionKey?.keyArn,
+        performanceInsightsRetentionPeriod: this.performanceInsightRetention,
         // only need to supply this when migrating from legacy method.
         // this is not applicable for aurora instances, but if you do provide it and then
         // change it it will cause an instance replacement
@@ -495,6 +551,7 @@ class AuroraClusterInstance extends Resource implements IAuroraClusterInstance {
         monitoringRoleArn: props.monitoringRole && props.monitoringRole.roleArn,
         autoMinorVersionUpgrade: props.autoMinorVersionUpgrade,
         allowMajorVersionUpgrade: props.allowMajorVersionUpgrade,
+        caCertificateIdentifier: props.caCertificate && props.caCertificate.toString(),
       });
     // For instances that are part of a cluster:
     //

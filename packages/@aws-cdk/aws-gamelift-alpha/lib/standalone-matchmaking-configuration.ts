@@ -4,6 +4,7 @@ import * as cdk from 'aws-cdk-lib/core';
 import { Construct } from 'constructs';
 import * as gamelift from 'aws-cdk-lib/aws-gamelift';
 import { MatchmakingConfigurationProps, MatchmakingConfigurationBase, IMatchmakingConfiguration } from './matchmaking-configuration';
+import { addConstructMetadata } from 'aws-cdk-lib/core/lib/metadata-resource';
 
 /**
  * Properties for a new standalone matchmaking configuration
@@ -20,17 +21,16 @@ export interface StandaloneMatchmakingConfigurationProps extends MatchmakingConf
  * @resource AWS::GameLift::MatchmakingConfiguration
  */
 export class StandaloneMatchmakingConfiguration extends MatchmakingConfigurationBase {
-
   /**
-     * Import an existing matchmaking configuration from its name.
-     */
+   * Import an existing matchmaking configuration from its name.
+   */
   static fromStandaloneMatchmakingConfigurationName(scope: Construct, id: string, matchmakingConfigurationName: string): IMatchmakingConfiguration {
     return this.fromMatchmakingConfigurationAttributes(scope, id, { matchmakingConfigurationName });
   }
 
   /**
-     * Import an existing matchmaking configuration from its ARN.
-     */
+   * Import an existing matchmaking configuration from its ARN.
+   */
   static fromStandaloneMatchmakingConfigurationArn(scope: Construct, id: string, matchmakingConfigurationArn: string): IMatchmakingConfiguration {
     return this.fromMatchmakingConfigurationAttributes(scope, id, { matchmakingConfigurationArn });
   }
@@ -39,10 +39,12 @@ export class StandaloneMatchmakingConfiguration extends MatchmakingConfiguration
    * The Identifier of the matchmaking configuration.
    */
   public readonly matchmakingConfigurationName: string;
+
   /**
    * The ARN of the matchmaking configuration.
    */
   public readonly matchmakingConfigurationArn: string;
+
   /**
    * The notification target for matchmaking events
    */
@@ -52,6 +54,8 @@ export class StandaloneMatchmakingConfiguration extends MatchmakingConfiguration
     super(scope, id, {
       physicalName: props.matchmakingConfigurationName,
     });
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     if (props.matchmakingConfigurationName && !cdk.Token.isUnresolved(props.matchmakingConfigurationName)) {
       if (props.matchmakingConfigurationName.length > 128) {
@@ -81,7 +85,7 @@ export class StandaloneMatchmakingConfiguration extends MatchmakingConfiguration
       throw new Error(`Matchmaking configuration request timeout can not exceed 43200 seconds, actual ${props.requestTimeout.toSeconds()} seconds.`);
     }
 
-    //Notification target
+    // Notification target
     this.notificationTarget = props.notificationTarget;
     if (!this.notificationTarget) {
       this.notificationTarget = new sns.Topic(this, 'Topic', {});

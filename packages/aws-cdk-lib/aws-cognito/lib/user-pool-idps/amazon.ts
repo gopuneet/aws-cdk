@@ -1,19 +1,20 @@
 import { Construct } from 'constructs';
 import { UserPoolIdentityProviderProps } from './base';
-import { UserPoolIdentityProviderBase } from './private/user-pool-idp-base';
 import { CfnUserPoolIdentityProvider } from '../cognito.generated';
+import { UserPoolIdentityProviderBase } from './private/user-pool-idp-base';
+import { addConstructMetadata } from '../../../core/lib/metadata-resource';
 
 /**
  * Properties to initialize UserPoolAmazonIdentityProvider
  */
 export interface UserPoolIdentityProviderAmazonProps extends UserPoolIdentityProviderProps {
   /**
-   * The client id recognized by 'Login with Amazon' APIs.
+   * The client id recognized by Login with Amazon APIs.
    * @see https://developer.amazon.com/docs/login-with-amazon/security-profile.html#client-identifier
    */
   readonly clientId: string;
   /**
-   * The client secret to be accompanied with clientId for 'Login with Amazon' APIs to authenticate the client.
+   * The client secret to be accompanied with clientId for Login with Amazon APIs to authenticate the client.
    * @see https://developer.amazon.com/docs/login-with-amazon/security-profile.html#client-identifier
    */
   readonly clientSecret: string;
@@ -26,7 +27,7 @@ export interface UserPoolIdentityProviderAmazonProps extends UserPoolIdentityPro
 }
 
 /**
- * Represents a identity provider that integrates with 'Login with Amazon'
+ * Represents an identity provider that integrates with Login with Amazon
  * @resource AWS::Cognito::UserPoolIdentityProvider
  */
 export class UserPoolIdentityProviderAmazon extends UserPoolIdentityProviderBase {
@@ -34,6 +35,8 @@ export class UserPoolIdentityProviderAmazon extends UserPoolIdentityProviderBase
 
   constructor(scope: Construct, id: string, props: UserPoolIdentityProviderAmazonProps) {
     super(scope, id, props);
+    // Enhanced CDK Analytics Telemetry
+    addConstructMetadata(this, props);
 
     const scopes = props.scopes ?? ['profile'];
 

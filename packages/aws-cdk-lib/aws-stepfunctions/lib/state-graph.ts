@@ -1,4 +1,7 @@
+import { StateMachine } from './state-machine';
+import { DistributedMap } from './states/distributed-map';
 import { State } from './states/state';
+import { QueryLanguage } from './types';
 import * as iam from '../../aws-iam';
 import { Duration } from '../../core';
 
@@ -103,10 +106,10 @@ export class StateGraph {
   /**
    * Return the Amazon States Language JSON for this graph
    */
-  public toGraphJson(): object {
+  public toGraphJson(queryLanguage?: QueryLanguage): object {
     const states: any = {};
     for (const state of this.allStates) {
-      states[state.stateId] = state.toStateJson();
+      states[state.stateId] = state.toStateJson(queryLanguage);
     }
 
     return {
@@ -159,4 +162,29 @@ export class StateGraph {
     }
   }
 
+  /**
+   * Binds this StateGraph to the StateMachine it defines and updates state machine permissions
+   */
+  public bind(stateMachine: StateMachine) {
+    for (const state of this.allStates) {
+      if (DistributedMap.isDistributedMap(state)) {
+        stateMachine.role.attachInlinePolicy(new iam.Policy(stateMachine, 'DistributedMapPolicy', {
+          document: new iam.PolicyDocument({
+            statements: [
+              new iam.PolicyStatement({
+                actions: ['states:StartExecution'],
+                resources: [stateMachine.stateMachineArn],
+              }),
+              new iam.PolicyStatement({
+                actions: ['states:DescribeExecution', 'states:StopExecution'],
+                resources: [`${stateMachine.stateMachineArn}:*`],
+              }),
+            ],
+          }),
+        }));
+
+        break;
+      }
+    }
+  }
 }

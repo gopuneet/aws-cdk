@@ -50,8 +50,7 @@ export interface ApplicationMultipleTargetGroupsServiceBaseProps {
   /**
    * The desired number of instantiations of the task definition to keep running on the service.
    *
-   * @default - If the feature flag, ECS_REMOVE_DEFAULT_DESIRED_COUNT is false, the default is 1;
-   * if true, the default is 1 for all new services and uses the existing services desired count
+   * @default - The default is 1 for all new services and uses the existing service's desired count
    * when updating an existing service.
    */
   readonly desiredCount?: number;
@@ -306,7 +305,7 @@ export interface ApplicationLoadBalancerProps {
   readonly domainZone?: IHostedZone;
 
   /**
-   * The load balancer idle timeout, in seconds
+   * The load balancer idle timeout, in seconds. Can be between 1 and 4000 seconds.
    *
    * @default - CloudFormation sets idle timeout to 60 seconds
    */
@@ -362,7 +361,6 @@ export interface ApplicationListenerProps {
  * The base class for ApplicationMultipleTargetGroupsEc2Service and ApplicationMultipleTargetGroupsFargateService classes.
  */
 export abstract class ApplicationMultipleTargetGroupsServiceBase extends Construct {
-
   /**
    * The desired number of instantiations of the task definition to keep running on the service.
    * @deprecated - Use `internalDesiredCount` instead.
@@ -383,7 +381,7 @@ export abstract class ApplicationMultipleTargetGroupsServiceBase extends Constru
   public readonly loadBalancer: ApplicationLoadBalancer;
 
   /**
-    * The default listener for the service (first added listener).
+   * The default listener for the service (first added listener).
    * @deprecated - Use `listeners` instead.
    */
   public readonly listener: ApplicationListener;
@@ -395,16 +393,16 @@ export abstract class ApplicationMultipleTargetGroupsServiceBase extends Constru
 
   protected logDriver?: LogDriver;
   /**
-    * The listeners of the service.
-    */
+   * The listeners of the service.
+   */
   public readonly listeners = new Array<ApplicationListener>();
   /**
-  * The target groups of the service.
-  */
+   * The target groups of the service.
+   */
   public readonly targetGroups = new Array<ApplicationTargetGroup>();
   /**
-  * The load balancers of the service.
-  */
+   * The load balancers of the service.
+   */
   public readonly loadBalancers = new Array<ApplicationLoadBalancer>();
 
   /**
@@ -585,12 +583,12 @@ export abstract class ApplicationMultipleTargetGroupsServiceBase extends Constru
   private validateLbProps(props: ApplicationLoadBalancerProps[]) {
     for (let prop of props) {
       if (prop.idleTimeout) {
-        if (prop.idleTimeout > Duration.seconds(4000) || prop.idleTimeout < Duration.seconds(1)) {
+        const idleTimeout = prop.idleTimeout.toSeconds();
+        if (idleTimeout > Duration.seconds(4000).toSeconds() || idleTimeout < Duration.seconds(1).toSeconds()) {
           throw new Error('Load balancer idle timeout must be between 1 and 4000 seconds.');
         }
       }
     }
-
   }
 
   private createLoadBalancer(name: string, publicLoadBalancer?: boolean, idleTimeout?: Duration): ApplicationLoadBalancer {
@@ -599,6 +597,7 @@ export abstract class ApplicationMultipleTargetGroupsServiceBase extends Constru
       vpc: this.cluster.vpc,
       internetFacing,
       idleTimeout: idleTimeout,
+      loadBalancerName: name,
     };
 
     return new ApplicationLoadBalancer(this, name, lbProps);

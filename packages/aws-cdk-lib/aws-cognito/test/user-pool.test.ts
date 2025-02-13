@@ -5,7 +5,7 @@ import { Role, ServicePrincipal } from '../../aws-iam';
 import * as kms from '../../aws-kms';
 import * as lambda from '../../aws-lambda';
 import { CfnParameter, Duration, Stack, Tags } from '../../core';
-import { AccountRecovery, Mfa, NumberAttribute, StringAttribute, UserPool, UserPoolIdentityProvider, UserPoolOperation, VerificationEmailStyle, UserPoolEmail, AdvancedSecurityMode } from '../lib';
+import { AccountRecovery, Mfa, NumberAttribute, StringAttribute, UserPool, UserPoolIdentityProvider, UserPoolOperation, VerificationEmailStyle, UserPoolEmail, AdvancedSecurityMode, LambdaVersion, FeaturePlan, PasskeyUserVerification } from '../lib';
 
 describe('User Pool', () => {
   test('default setup', () => {
@@ -159,14 +159,35 @@ describe('User Pool', () => {
     expect(() => new UserPool(stack, 'Pool5', {
       userVerification: {
         emailStyle: VerificationEmailStyle.LINK,
-        emailBody: 'invalid email body {####}',
+        emailBody: 'valid email body {####}',
       },
-    })).toThrow(/Verification email body/);
+    })).not.toThrow();
 
     expect(() => new UserPool(stack, 'Pool6', {
       userVerification: {
         emailStyle: VerificationEmailStyle.LINK,
-        emailBody: 'invalid email body {##Verify Email##}',
+        emailBody: 'valid email body {##Verify Email##}',
+      },
+    })).not.toThrow();
+
+    expect(() => new UserPool(stack, 'Pool7', {
+      userVerification: {
+        emailStyle: VerificationEmailStyle.LINK,
+        emailBody: 'invalid email body ##Verify Email##',
+      },
+    })).toThrow(/Verification email body/);
+
+    expect(() => new UserPool(stack, 'Pool8', {
+      userVerification: {
+        emailStyle: VerificationEmailStyle.LINK,
+        emailBody: 'valid email body {##Verify !! Email##}',
+      },
+    })).not.toThrow();
+
+    expect(() => new UserPool(stack, 'Pool9', {
+      userVerification: {
+        emailStyle: VerificationEmailStyle.LINK,
+        emailBody: 'valid email body {##Click here to verify##}',
       },
     })).not.toThrow();
   });
@@ -279,6 +300,9 @@ describe('User Pool', () => {
     const pool = UserPool.fromUserPoolArn(stack, 'userpool', userPoolArn);
     expect(pool.userPoolId).toEqual('test-user-pool');
     expect(stack.resolve(pool.userPoolArn)).toEqual('arn:aws:cognito-idp:us-east-1:0123456789012:userpool/test-user-pool');
+    expect(stack.resolve(pool.userPoolProviderName)).toEqual(
+      { 'Fn::Join': ['', ['cognito-idp.us-east-1.', { Ref: 'AWS::URLSuffix' }, '/test-user-pool']] },
+    );
   });
 
   test('import using arn without resourceName fails', () => {
@@ -289,7 +313,7 @@ describe('User Pool', () => {
     // WHEN
     expect(() => {
       UserPool.fromUserPoolArn(stack, 'userpool', userPoolArn);
-    }).toThrowError(/invalid user pool ARN/);
+    }).toThrow(/invalid user pool ARN/);
   });
 
   test('import from different account region using arn', () => {
@@ -487,6 +511,95 @@ describe('User Pool', () => {
     });
   });
 
+  test('add preTokenGeneration default trigger', () => {
+    // GIVEN
+    const stack = new Stack();
+    const kmsKey = fooKey(stack, 'TestKMSKey');
+
+    const preTokenGeneration = fooFunction(stack, 'preTokenGeneration');
+
+    // WHEN
+    const pool = new UserPool(stack, 'Pool', {
+      customSenderKmsKey: kmsKey,
+      advancedSecurityMode: AdvancedSecurityMode.ENFORCED,
+    });
+    pool.addTrigger(UserPoolOperation.PRE_TOKEN_GENERATION_CONFIG, preTokenGeneration);
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPool', {
+      LambdaConfig: {
+        PreTokenGenerationConfig: {
+          LambdaArn: stack.resolve(preTokenGeneration.functionArn),
+          LambdaVersion: 'V1_0',
+        },
+      },
+      UserPoolAddOns: {
+        AdvancedSecurityMode: 'ENFORCED',
+      },
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::Lambda::Permission', {
+      Action: 'lambda:InvokeFunction',
+      FunctionName: stack.resolve(preTokenGeneration.functionArn),
+      Principal: 'cognito-idp.amazonaws.com',
+      SourceArn: stack.resolve(pool.userPoolArn),
+    });
+  });
+
+  test('add preTokenGeneration trigger v2', () => {
+    // GIVEN
+    const stack = new Stack();
+    const kmsKey = fooKey(stack, 'TestKMSKey');
+
+    const preTokenGeneration = fooFunction(stack, 'preTokenGeneration');
+
+    // WHEN
+    const pool = new UserPool(stack, 'Pool', {
+      customSenderKmsKey: kmsKey,
+      advancedSecurityMode: AdvancedSecurityMode.ENFORCED,
+    });
+    pool.addTrigger(UserPoolOperation.PRE_TOKEN_GENERATION_CONFIG, preTokenGeneration, LambdaVersion.V2_0);
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPool', {
+      LambdaConfig: {
+        PreTokenGenerationConfig: {
+          LambdaArn: stack.resolve(preTokenGeneration.functionArn),
+          LambdaVersion: 'V2_0',
+        },
+      },
+      UserPoolAddOns: {
+        AdvancedSecurityMode: 'ENFORCED',
+      },
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::Lambda::Permission', {
+      Action: 'lambda:InvokeFunction',
+      FunctionName: stack.resolve(preTokenGeneration.functionArn),
+      Principal: 'cognito-idp.amazonaws.com',
+      SourceArn: stack.resolve(pool.userPoolArn),
+    });
+  });
+
+  test('throw error when lambda trigger version v2 is specified for an invalid operation', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    const preTokenGeneration = fooFunction(stack, 'preTokenGeneration');
+
+    // WHEN
+    const pool = new UserPool(stack, 'Pool', {
+      advancedSecurityMode: AdvancedSecurityMode.ENFORCED,
+    });
+    expect(() => {
+      pool.addTrigger(
+        UserPoolOperation.PRE_TOKEN_GENERATION,
+        preTokenGeneration,
+        LambdaVersion.V2_0,
+      );
+    }).toThrow(/Only the `PRE_TOKEN_GENERATION_CONFIG` operation supports V2_0 lambda version./);
+  });
+
   test('can use same lambda as trigger for multiple user pools', () => {
     // GIVEN
     const stack = new Stack();
@@ -520,12 +633,12 @@ describe('User Pool', () => {
 
     const fn1 = new lambda.Function(stack, 'fn1', {
       code: lambda.Code.fromInline('foo'),
-      runtime: lambda.Runtime.NODEJS_14_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
       handler: 'index.handler',
     });
     const fn2 = new lambda.Function(stack, 'fn2', {
       code: lambda.Code.fromInline('foo'),
-      runtime: lambda.Runtime.NODEJS_14_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
       handler: 'index.handler',
     });
 
@@ -1623,7 +1736,6 @@ describe('User Pool', () => {
         replyTo: 'reply@example.com',
       }),
     })).toThrow(/Your stack region cannot be determined/);
-
   });
 
   test('email withSES with no name', () => {
@@ -1665,7 +1777,6 @@ describe('User Pool', () => {
         },
       },
     });
-
   });
 
   test('email withSES', () => {
@@ -1903,7 +2014,6 @@ describe('User Pool', () => {
         },
       },
     });
-
   });
 
   test('email withSES with verified domain', () => {
@@ -1974,6 +2084,154 @@ describe('User Pool', () => {
         sesVerifiedDomain: 'example.com',
       }),
     })).toThrow(/"fromEmail" contains a different domain than the "sesVerifiedDomain"/);
+  });
+
+  test('signInPolicy is not present if none of options are not provided', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    new UserPool(stack, 'Pool', {
+      signInPolicy: {},
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPool', {
+      Policies: Match.absent(),
+    });
+  });
+
+  test('allowFirstAuthFactors throws when password is false', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    expect(() => {
+      new UserPool(stack, 'Pool', {
+        signInPolicy: {
+          allowedFirstAuthFactors: { password: false },
+        },
+      });
+    }).toThrow('The password authentication cannot be disabled.');
+  });
+
+  test('allowFirstAuthFactors are correctly named', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    new UserPool(stack, 'Pool', {
+      signInPolicy: {
+        allowedFirstAuthFactors: {
+          password: true,
+          emailOtp: true,
+          smsOtp: true,
+          passkey: true,
+        },
+      },
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPool', {
+      Policies: {
+        SignInPolicy: {
+          AllowedFirstAuthFactors: [
+            'PASSWORD',
+            'EMAIL_OTP',
+            'SMS_OTP',
+            'WEB_AUTHN',
+          ],
+        },
+      },
+    });
+  });
+
+  test('allowFirstAuthFactors throws when the feature plan is Lite', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    expect(() => {
+      new UserPool(stack, 'Pool', {
+        signInPolicy: {
+          allowedFirstAuthFactors: { password: true, emailOtp: true },
+        },
+        featurePlan: FeaturePlan.LITE,
+      });
+    }).toThrow('To enable choice-based authentication, set `featurePlan` to `FeaturePlan.ESSENTIALS` or `FeaturePlan.PLUS`.');
+  });
+
+  test('allowFirstAuthFactors can specify only password when the feature plan is Lite', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    new UserPool(stack, 'Pool', {
+      signInPolicy: {
+        allowedFirstAuthFactors: { password: true },
+      },
+      featurePlan: FeaturePlan.LITE,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPool', {
+      Policies: {
+        SignInPolicy: {
+          AllowedFirstAuthFactors: ['PASSWORD'],
+        },
+      },
+    });
+  });
+
+  test('passkeyRelyingPartyId is configured', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    new UserPool(stack, 'Pool', {
+      passkeyRelyingPartyId: 'example.com',
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPool', {
+      WebAuthnRelyingPartyID: 'example.com',
+    });
+  });
+
+  test('passkeyRelyingPartyId length must be >= 1', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    expect(() => {
+      new UserPool(stack, 'Pool1', { passkeyRelyingPartyId: '' });
+    }).toThrow('passkeyRelyingPartyId length must be (inclusively) between 1 and 63, got 0');
+  });
+
+  test('passkeyRelyingPartyId length must be <= 63', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    expect(() => {
+      new UserPool(stack, 'Pool2', { passkeyRelyingPartyId: 'x'.repeat(64) });
+    }).toThrow('passkeyRelyingPartyId length must be (inclusively) between 1 and 63, got 64');
+  });
+
+  test.each([
+    [PasskeyUserVerification.PREFERRED, 'preferred'],
+    [PasskeyUserVerification.REQUIRED, 'required'],
+  ])('passkeyUserVerification is configured correctly when set to (%s)', (passkeyUserVerification, compareString) => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    new UserPool(stack, 'Pool', { passkeyUserVerification });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPool', {
+      WebAuthnUserVerification: compareString,
+    });
   });
 });
 
@@ -2057,7 +2315,6 @@ test('grant', () => {
       },
     ],
   });
-
 });
 
 test('deletion protection', () => {
@@ -2072,6 +2329,36 @@ test('deletion protection', () => {
   // THEN
   Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPool', {
     DeletionProtection: 'ACTIVE',
+  });
+});
+
+test.each([
+  [FeaturePlan.LITE, 'LITE'],
+  [FeaturePlan.ESSENTIALS, 'ESSENTIALS'],
+  [FeaturePlan.PLUS, 'PLUS'],
+])('feature plan is configured correctly when set to (%s)', (featurePlan, compareString) => {
+  // GIVEN
+  const stack = new Stack();
+
+  // WHEN
+  new UserPool(stack, 'Pool', { featurePlan });
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPool', {
+    UserPoolTier: compareString,
+  });
+});
+
+test('feature plan is not present if option is not provided', () => {
+  // GIVEN
+  const stack = new Stack();
+
+  // WHEN
+  new UserPool(stack, 'Pool', {});
+
+  // THEN
+  Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPool', {
+    UserPoolTier: Match.absent(),
   });
 });
 
@@ -2110,11 +2397,175 @@ test('advanced security is not present if option is not provided', () => {
   });
 });
 
+test.each([
+  [FeaturePlan.ESSENTIALS, AdvancedSecurityMode.AUDIT],
+  [FeaturePlan.ESSENTIALS, AdvancedSecurityMode.ENFORCED],
+  [FeaturePlan.PLUS, AdvancedSecurityMode.AUDIT],
+  [FeaturePlan.PLUS, AdvancedSecurityMode.ENFORCED],
+])('throws when feature plan is %s and advanced security mode is %s', (featurePlan, advancedSecurityMode) => {
+  // GIVEN
+  const stack = new Stack();
+
+  // WHEN
+  expect(() => {
+    new UserPool(stack, 'Pool', { featurePlan, advancedSecurityMode });
+  }).toThrow('you cannot enable Advanced Security Mode when feature plan is Essentials or higher.');
+});
+
+describe('email MFA test', () => {
+  test('email MFA enabled', () => {
+    // GIVEN
+    const stack = new Stack();
+
+    // WHEN
+    new UserPool(stack, 'myuserpool', {
+      email: UserPoolEmail.withSES({
+        sesRegion: 'us-east-1',
+        fromEmail: 'noreply@example.com',
+        fromName: 'myname@mycompany.com',
+        replyTo: 'support@example.com',
+        sesVerifiedDomain: 'example.com',
+      }),
+      mfa: Mfa.REQUIRED,
+      mfaSecondFactor: {
+        sms: true,
+        otp: false,
+        email: true,
+      },
+      featurePlan: FeaturePlan.ESSENTIALS,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPool', {
+      EnabledMfas: ['SMS_MFA', 'EMAIL_OTP'],
+    });
+  });
+
+  test('throws when email MFA is enabled with no email settings.', () => {
+    const stack = new Stack();
+
+    expect(() => new UserPool(stack, 'Pool1', {
+      mfa: Mfa.REQUIRED,
+      mfaSecondFactor: {
+        sms: true,
+        otp: false,
+        email: true,
+      },
+      featurePlan: FeaturePlan.ESSENTIALS,
+    })).toThrow('To enable email-based MFA, set `email` property to the Amazon SES email-sending configuration.');
+  });
+
+  test('throws when email MFA is enabled with not SES email settings.', () => {
+    const stack = new Stack();
+
+    expect(() => new UserPool(stack, 'Pool1', {
+      mfa: Mfa.REQUIRED,
+      email: UserPoolEmail.withCognito(),
+      mfaSecondFactor: {
+        sms: true,
+        otp: false,
+        email: true,
+      },
+      featurePlan: FeaturePlan.ESSENTIALS,
+    })).toThrow('To enable email-based MFA, set `email` property to the Amazon SES email-sending configuration.');
+  });
+
+  test.each([
+    AdvancedSecurityMode.AUDIT,
+    AdvancedSecurityMode.ENFORCED,
+  ])('email MFA with Lite feature plan and %s Advanced Security Mode', (advancedSecurityMode) => {
+    const stack = new Stack();
+
+    expect(() => new UserPool(stack, 'Pool1', {
+      email: UserPoolEmail.withSES({
+        sesRegion: 'us-east-1',
+        fromEmail: 'noreply@example.com',
+        fromName: 'myname@mycompany.com',
+        replyTo: 'support@example.com',
+        sesVerifiedDomain: 'example.com',
+      }),
+      mfa: Mfa.REQUIRED,
+      mfaSecondFactor: {
+        sms: true,
+        otp: false,
+        email: true,
+      },
+      featurePlan: FeaturePlan.LITE,
+      advancedSecurityMode,
+    })).not.toThrow();
+  });
+
+  test('throws when email MFA is enabled with Lite feature plan', () => {
+    const stack = new Stack();
+
+    expect(() => new UserPool(stack, 'Pool1', {
+      email: UserPoolEmail.withSES({
+        sesRegion: 'us-east-1',
+        fromEmail: 'noreply@example.com',
+        fromName: 'myname@mycompany.com',
+        replyTo: 'support@example.com',
+        sesVerifiedDomain: 'example.com',
+      }),
+      mfa: Mfa.REQUIRED,
+      mfaSecondFactor: {
+        sms: true,
+        otp: false,
+        email: true,
+      },
+      featurePlan: FeaturePlan.LITE,
+    })).toThrow('To enable email-based MFA, set `featurePlan` to `FeaturePlan.ESSENTIALS` or `FeaturePlan.PLUS`.');
+  });
+
+  describe('test passwordHistorySize', () => {
+    test('correctly set passwordHistorySize', () => {
+      // GIVEN
+      const stack = new Stack();
+
+      // WHEN
+      new UserPool(stack, 'Pool', {
+        passwordPolicy: {
+          passwordHistorySize: 3,
+        },
+      });
+
+      // THEN
+      Template.fromStack(stack).hasResourceProperties('AWS::Cognito::UserPool', {
+        Policies: {
+          PasswordPolicy: {
+            PasswordHistorySize: 3,
+          },
+        },
+      });
+    });
+
+    test('throws an error when email passwordHistorySize is set with FaturePlan.LITE', () => {
+      const stack = new Stack();
+
+      expect(() => new UserPool(stack, 'Pool', {
+        passwordPolicy: {
+          passwordHistorySize: 3,
+        },
+        featurePlan: FeaturePlan.LITE,
+      })).toThrow('`passwordHistorySize` can not be set when `featurePlan` is `FeaturePlan.LITE`.');
+    });
+
+    test.each([-1, 25])('throws an error when email passwordHistorySize is invalid', (passwordHistorySize) => {
+      const stack = new Stack();
+
+      expect(() => new UserPool(stack, 'Pool', {
+        passwordPolicy: {
+          passwordHistorySize,
+        },
+      })).toThrow(`\`passwordHistorySize\` must be between 0 and 24 (received: ${passwordHistorySize}).`);
+    });
+  });
+});
+
 function fooFunction(scope: Construct, name: string): lambda.IFunction {
   return new lambda.Function(scope, name, {
     functionName: name,
     code: lambda.Code.fromInline('foo'),
-    runtime: lambda.Runtime.NODEJS_14_X,
+    runtime: lambda.Runtime.NODEJS_LATEST,
     handler: 'index.handler',
   });
 }

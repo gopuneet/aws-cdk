@@ -13,7 +13,7 @@ import * as cpa from '../../../aws-codepipeline-actions';
 import * as ec2 from '../../../aws-ec2';
 import * as iam from '../../../aws-iam';
 import * as s3 from '../../../aws-s3';
-import { Aws, CfnCapabilities, Duration, PhysicalName, Stack, Names } from '../../../core';
+import { Aws, CfnCapabilities, Duration, PhysicalName, Stack, Names, FeatureFlags, UnscopedValidationError, ValidationError } from '../../../core';
 import * as cxapi from '../../../cx-api';
 import { AssetType, FileSet, IFileSetProducer, ManualApprovalStep, ShellStep, StackAsset, StackDeployment, Step } from '../blueprint';
 import { DockerCredential, dockerCredentialsInstallCommands, DockerCredentialUsage } from '../docker-credentials';
@@ -131,7 +131,7 @@ export interface CodePipelineProps {
    * application stacks.
    *
    * A common way to use bundling assets in your application is by
-   * using the `@aws-cdk/aws-lambda-nodejs` library.
+   * using the `aws-cdk-lib/aws-lambda-nodejs` library.
    *
    * Configures privileged mode for the synth CodeBuild action.
    *
@@ -146,7 +146,7 @@ export interface CodePipelineProps {
   /**
    * Customize the CodeBuild projects created for this pipeline
    *
-   * @default - All projects run non-privileged build, SMALL instance, LinuxBuildImage.STANDARD_6_0
+   * @default - All projects run non-privileged build, SMALL instance, LinuxBuildImage.STANDARD_7_0
    */
   readonly codeBuildDefaults?: CodeBuildOptions;
 
@@ -244,6 +244,16 @@ export interface CodePipelineProps {
    * @default - A new S3 bucket will be created.
    */
   readonly artifactBucket?: s3.IBucket;
+  /**
+   * A map of region to S3 bucket name used for cross-region CodePipeline.
+   * For every Action that you specify targeting a different region than the Pipeline itself,
+   * if you don't provide an explicit Bucket for that region using this property,
+   * the construct will automatically create a Stack containing an S3 Bucket in that region.
+   * Passed directly through to the {@link cp.Pipeline}.
+   *
+   * @default - no cross region replication buckets.
+   */
+  readonly crossRegionReplicationBuckets?: { [region: string]: s3.IBucket };
 }
 
 /**
@@ -253,7 +263,7 @@ export interface CodeBuildOptions {
   /**
    * Partial build environment, will be combined with other build environments that apply
    *
-   * @default - Non-privileged build, SMALL instance, LinuxBuildImage.STANDARD_6_0
+   * @default - Non-privileged build, SMALL instance, LinuxBuildImage.STANDARD_7_0
    */
   readonly buildEnvironment?: cb.BuildEnvironment;
 
@@ -390,7 +400,7 @@ export class CodePipeline extends PipelineBase {
    */
   public get synthProject(): cb.IProject {
     if (!this._synthProject) {
-      throw new Error('Call pipeline.buildPipeline() before reading this property');
+      throw new UnscopedValidationError('Call pipeline.buildPipeline() before reading this property');
     }
     return this._synthProject;
   }
@@ -403,10 +413,10 @@ export class CodePipeline extends PipelineBase {
    */
   public get selfMutationProject(): cb.IProject {
     if (!this._pipeline) {
-      throw new Error('Call pipeline.buildPipeline() before reading this property');
+      throw new UnscopedValidationError('Call pipeline.buildPipeline() before reading this property');
     }
     if (!this._selfMutationProject) {
-      throw new Error('No selfMutationProject since the selfMutation property was set to false');
+      throw new UnscopedValidationError('No selfMutationProject since the selfMutation property was set to false');
     }
     return this._selfMutationProject;
   }
@@ -418,43 +428,48 @@ export class CodePipeline extends PipelineBase {
    */
   public get pipeline(): cp.Pipeline {
     if (!this._pipeline) {
-      throw new Error('Pipeline not created yet');
+      throw new UnscopedValidationError('Pipeline not created yet');
     }
     return this._pipeline;
   }
 
   protected doBuildPipeline(): void {
     if (this._pipeline) {
-      throw new Error('Pipeline already created');
+      throw new ValidationError('Pipeline already created', this);
     }
 
     this._myCxAsmRoot = path.resolve(assemblyBuilderOf(appOf(this)).outdir);
 
     if (this.props.codePipeline) {
       if (this.props.pipelineName) {
-        throw new Error('Cannot set \'pipelineName\' if an existing CodePipeline is given using \'codePipeline\'');
+        throw new ValidationError('Cannot set \'pipelineName\' if an existing CodePipeline is given using \'codePipeline\'', this);
       }
       if (this.props.crossAccountKeys !== undefined) {
-        throw new Error('Cannot set \'crossAccountKeys\' if an existing CodePipeline is given using \'codePipeline\'');
+        throw new ValidationError('Cannot set \'crossAccountKeys\' if an existing CodePipeline is given using \'codePipeline\'', this);
       }
       if (this.props.enableKeyRotation !== undefined) {
-        throw new Error('Cannot set \'enableKeyRotation\' if an existing CodePipeline is given using \'codePipeline\'');
+        throw new ValidationError('Cannot set \'enableKeyRotation\' if an existing CodePipeline is given using \'codePipeline\'', this);
+      }
+      if (this.props.crossRegionReplicationBuckets !== undefined) {
+        throw new ValidationError('Cannot set \'crossRegionReplicationBuckets\' if an existing CodePipeline is given using \'codePipeline\'', this);
       }
       if (this.props.reuseCrossRegionSupportStacks !== undefined) {
-        throw new Error('Cannot set \'reuseCrossRegionSupportStacks\' if an existing CodePipeline is given using \'codePipeline\'');
+        throw new ValidationError('Cannot set \'reuseCrossRegionSupportStacks\' if an existing CodePipeline is given using \'codePipeline\'', this);
       }
       if (this.props.role !== undefined) {
-        throw new Error('Cannot set \'role\' if an existing CodePipeline is given using \'codePipeline\'');
+        throw new ValidationError('Cannot set \'role\' if an existing CodePipeline is given using \'codePipeline\'', this);
       }
       if (this.props.artifactBucket !== undefined) {
-        throw new Error('Cannot set \'artifactBucket\' if an existing CodePipeline is given using \'codePipeline\'');
+        throw new ValidationError('Cannot set \'artifactBucket\' if an existing CodePipeline is given using \'codePipeline\'', this);
       }
 
       this._pipeline = this.props.codePipeline;
     } else {
       this._pipeline = new cp.Pipeline(this, 'Pipeline', {
         pipelineName: this.props.pipelineName,
+        pipelineType: cp.PipelineType.V1,
         crossAccountKeys: this.props.crossAccountKeys ?? false,
+        crossRegionReplicationBuckets: this.props.crossRegionReplicationBuckets,
         reuseCrossRegionSupportStacks: this.props.reuseCrossRegionSupportStacks,
         // This is necessary to make self-mutation work (deployments are guaranteed
         // to happen only after the builds of the latest pipeline definition).
@@ -481,7 +496,7 @@ export class CodePipeline extends PipelineBase {
 
   private get myCxAsmRoot(): string {
     if (!this._myCxAsmRoot) {
-      throw new Error('Can\'t read \'myCxAsmRoot\' if build deployment not called yet');
+      throw new ValidationError('Can\'t read \'myCxAsmRoot\' if build deployment not called yet', this);
     }
     return this._myCxAsmRoot;
   }
@@ -500,7 +515,7 @@ export class CodePipeline extends PipelineBase {
     let beforeSelfMutation = this.selfMutationEnabled;
     for (const stageNode of flatten(structure.graph.sortedChildren())) {
       if (!isGraph(stageNode)) {
-        throw new Error(`Top-level children must be graphs, got '${stageNode}'`);
+        throw new ValidationError(`Top-level children must be graphs, got '${stageNode}'`, this);
       }
 
       // Group our ordered tranches into blocks of 50.
@@ -595,7 +610,7 @@ export class CodePipeline extends PipelineBase {
       case 'group':
       case 'stack-group':
       case undefined:
-        throw new Error(`actionFromNode: did not expect to get group nodes: ${node.data?.type}`);
+        throw new ValidationError(`actionFromNode: did not expect to get group nodes: ${node.data?.type}`, this);
 
       case 'self-update':
         return this.selfMutateAction();
@@ -615,7 +630,7 @@ export class CodePipeline extends PipelineBase {
         return this.actionFromStep(node, node.data.step);
 
       default:
-        throw new Error(`CodePipeline does not support graph nodes of type '${node.data?.type}'. You are probably using a feature this CDK Pipelines implementation does not support.`);
+        throw new ValidationError(`CodePipeline does not support graph nodes of type '${node.data?.type}'. You are probably using a feature this CDK Pipelines implementation does not support.`, this);
     }
   }
 
@@ -664,7 +679,7 @@ export class CodePipeline extends PipelineBase {
       };
     }
 
-    throw new Error(`Deployment step '${step}' is not supported for CodePipeline-backed pipelines`);
+    throw new ValidationError(`Deployment step '${step}' is not supported for CodePipeline-backed pipelines`, this);
   }
 
   private createChangeSetAction(stack: StackDeployment): ICodePipelineActionFactory {
@@ -802,8 +817,6 @@ export class CodePipeline extends PipelineBase {
   }
 
   private publishAssetsAction(node: AGraphNode, assets: StackAsset[]): ICodePipelineActionFactory {
-    const installSuffix = this.cliVersion ? `@${this.cliVersion}` : '';
-
     const commands = assets.map(asset => {
       const relativeAssetManifestPath = path.relative(this.myCxAsmRoot, asset.assetManifestPath);
       return `cdk-assets --path "${toPosixPath(relativeAssetManifestPath)}" --verbose publish "${asset.assetSelector}"`;
@@ -811,7 +824,7 @@ export class CodePipeline extends PipelineBase {
 
     const assetType = assets[0].assetType;
     if (assets.some(a => a.assetType !== assetType)) {
-      throw new Error('All assets in a single publishing step must be of the same type');
+      throw new ValidationError('All assets in a single publishing step must be of the same type', this);
     }
 
     const role = this.obtainAssetCodeBuildRole(assets[0].assetType);
@@ -819,13 +832,13 @@ export class CodePipeline extends PipelineBase {
     for (const roleArn of assets.flatMap(a => a.assetPublishingRoleArn ? [a.assetPublishingRoleArn] : [])) {
       // The ARNs include raw AWS pseudo parameters (e.g., ${AWS::Partition}), which need to be substituted.
       role.addAssumeRole(this.cachedFnSub.fnSub(roleArn));
-    };
+    }
 
     // The base commands that need to be run
     const script = new CodeBuildStep(node.id, {
       commands,
       installCommands: [
-        `npm install -g cdk-assets${installSuffix}`,
+        'npm install -g cdk-assets@latest',
       ],
       input: this._cloudAssemblyFileSet,
       buildEnvironment: {
@@ -912,7 +925,6 @@ export class CodePipeline extends PipelineBase {
     account: string | undefined, arn: string | undefined): iam.IRole | undefined;
   private roleFromPlaceholderArn(scope: Construct, region: string | undefined,
     account: string | undefined, arn: string | undefined): iam.IRole | undefined {
-
     if (!arn) { return undefined; }
 
     // Use placeholder arn as construct ID.
@@ -969,13 +981,20 @@ export class CodePipeline extends PipelineBase {
 
     const stack = Stack.of(this);
 
-    const rolePrefix = assetType === AssetType.DOCKER_IMAGE ? 'Docker' : 'File';
-    const assetRole = new AssetSingletonRole(this.assetsScope, `${rolePrefix}Role`, {
-      roleName: PhysicalName.GENERATE_IF_NEEDED,
-      assumedBy: new iam.CompositePrincipal(
+    const removeRootPrincipal = FeatureFlags.of(this).isEnabled(cxapi.PIPELINE_REDUCE_ASSET_ROLE_TRUST_SCOPE);
+
+    const assumePrincipal = removeRootPrincipal ? new iam.CompositePrincipal(
+      new iam.ServicePrincipal('codebuild.amazonaws.com'),
+    ) :
+      new iam.CompositePrincipal(
         new iam.ServicePrincipal('codebuild.amazonaws.com'),
         new iam.AccountPrincipal(stack.account),
-      ),
+      );
+
+    const rolePrefix = assetType === AssetType.DOCKER_IMAGE ? 'Docker' : 'File';
+    let assetRole = new AssetSingletonRole(this.assetsScope, `${rolePrefix}Role`, {
+      roleName: PhysicalName.GENERATE_IF_NEEDED,
+      assumedBy: assumePrincipal,
     });
 
     // Grant pull access for any ECR registries and secrets that exist
@@ -986,7 +1005,6 @@ export class CodePipeline extends PipelineBase {
     this.assetCodeBuildRoles.set(assetType, assetRole);
     return assetRole;
   }
-
 }
 
 function dockerUsageFromCodeBuild(cbt: CodeBuildProjectType): DockerCredentialUsage | undefined {
